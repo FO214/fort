@@ -42,6 +42,12 @@ http will not get them.
   the crosshair is on it.
 - **Shooting.** Fire sends the zombies under the crosshair (nearest first)
   and where the gun pointed. The server has the last word.
+- **Revive.** When a knocked teammate is within reach, a Hold to revive
+  button appears bottom-centre. The phone keeps telling the server while it
+  is held.
+- **Extraction.** In the final wave the camera also reads QR codes. While
+  the helicopter's code is in view a Hold to extract button appears; holding
+  it tells the server. No separate scan mode.
 
 `src/game/tracking.ts` ties the sensors to those modules and reports the
 phone's pose to the server 8 times a second.
@@ -57,6 +63,8 @@ src/sensors/          native (expo-location, expo-sensors) · web · sim (tests)
 src/game/             position, orientation, steps, zombies, tracking
 src/ui/ZombieLayer    places sprites over the camera, works out the aim
 src/ui/ZombieSprite   what a zombie looks like — the one file to swap for real art
+src/ui/ObjectiveBar   helicopter direction → hold 1/2 → extraction bar
+src/ui/ReviveButton, ExtractHold, DownedOverlay   the mission's hold actions and downed states
 src/ui/               Glass kit, Reticle, FireButton, Radar, HealthBar, Squad, …
 src/screens/          Menu, Join, Lobby, Game, Summary
 e2e/                  Playwright: logic tests + simulated phones
@@ -77,7 +85,10 @@ The e2e uses Google Chrome if it is installed, otherwise run
 
 Sensors are driven through `window.__loonieSim` (web build with `?sim=1`):
 tests put each player at a map position, turn them to face a zombie, walk
-them with step and GPS events, and press the real on-screen buttons.
+them with step and GPS events, hold a QR code up to the camera, and press
+and hold the real on-screen buttons. One test plays a whole mission with
+four phones: knocked, revived, arrive, hold two waves, two extract while
+two defend.
 Screenshots of every screen land in `e2e/output/`. The "camera" in those
 screenshots is a drawn corridor (`e2e/fakeCamera.ts`).
 
@@ -91,6 +102,9 @@ screenshots is a drawn corridor (`e2e/fakeCamera.ts`).
   zombies drift sideways against the room as you turn, adjust it.
 - Step detection thresholds (`src/game/steps.ts`) with the phone on the gun.
 - How noisy GPS is in the building.
+- Reading the helicopter QR code through the game camera. Tests simulate
+  "code in view"; the real scan path (`onBarcodeScanned`) has not run on a
+  device. Any QR whose text is `LOONIE:HELI` is the helicopter for now.
 
 ## Building for a phone without Expo Go
 

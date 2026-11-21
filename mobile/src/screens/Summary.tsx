@@ -8,7 +8,6 @@ import { GlassButton } from '../ui/GlassButton';
 import { Screen } from '../ui/Screen';
 import { T } from '../ui/T';
 
-const STATE_LABEL = { alive: 'standing', knocked: 'knocked', dead: 'dead' } as const;
 
 export function Summary() {
   const s = useStore();
@@ -19,6 +18,9 @@ export function Summary() {
   const results = e?.results ?? [];
   const mine = s.session?.playerId;
   const won = e?.outcome === 'extracted';
+  // Whoever was still down when the helicopter left did not make it.
+  const fate = (state: 'alive' | 'knocked' | 'dead') =>
+    state === 'dead' ? 'dead' : state === 'knocked' ? (won ? 'left behind' : 'knocked') : won ? 'extracted' : 'standing';
   const mm = Math.floor((e?.duration_s ?? 0) / 60), ss = Math.floor((e?.duration_s ?? 0) % 60);
 
   const headline = (
@@ -42,7 +44,9 @@ export function Summary() {
           <T v="mono" c={i === 0 ? color.accent : color.ink3} style={{ width: 20 }}>{i + 1}</T>
           <View style={{ flex: 1 }}>
             <T v="headline" c={r.id === mine ? color.accent : color.ink}>{r.name}</T>
-            <T v="caption" c={r.state === 'alive' ? color.ink3 : color.danger}>{s.classes[r.cls]?.name ?? r.cls}  ·  {STATE_LABEL[r.state]}</T>
+            <T v="caption" c={r.state === 'alive' ? color.ink3 : color.danger}>
+              {s.classes[r.cls]?.name ?? r.cls}  ·  {fate(r.state)}{r.revives ? `  ·  ${r.revives} revive${r.revives > 1 ? 's' : ''}` : ''}
+            </T>
           </View>
           <T v="mono" c={color.ink}>{r.kills}<T v="caption" c={color.ink3}> kills</T></T>
           <T v="mono" c={color.ink2} style={{ minWidth: 64, textAlign: 'right' }}>{r.damage}<T v="caption" c={color.ink3}> dmg</T></T>

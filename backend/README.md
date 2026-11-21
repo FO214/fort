@@ -11,7 +11,7 @@ Needs Python 3.10 or newer.
 ```sh
 python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
-.venv/bin/python -m pytest
+.venv/bin/python -m pytest      # 72 tests, about 45 s (most of it is the live socket tests)
 ```
 
 Phones on the same Wi-Fi reach it at `ws://<your-laptop-ip>:8000/ws`.
@@ -43,8 +43,25 @@ maps/arena.json  built-in open test map
   sends `fire {seq, hits, heading}`. The server checks ammo, fire rate and
   reload, then that the claimed zombie exists, is in range, and lies within a
   small angle of where the gun points. One bullet hits one zombie.
-- **Zombies** chase the nearest standing player and bite within 1.5 m after a
-  short wind-up. Health 0 means knocked; everyone down ends the mission.
+- **Zombies** chase the nearest player who is not dead, knocked or not, and
+  bite within 1.5 m after a short wind-up.
+- **Mission.** `journey` (waves on the way to the helicopter) → `holdout`
+  (survive 2 waves there, each must be cleared) → `final` (a last wave that is
+  topped up until the squad is out) → `extracted`, or `wiped` when nobody is
+  left standing.
+- **Arrival.** Any standing player inside the helicopter radius, which grows
+  by half that phone's GPS accuracy (up to 10 m). The host can also send
+  `arrived` when GPS will not admit it.
+- **Knocked and revive.** Health 0 is knocked: no shooting, and each bite
+  drains the bleed-out bar (8 bites) until dead. A standing teammate within
+  4 m plus both phones' GPS accuracy (slack capped at 25 m) holds `revive` for
+  3 s. It does not progress while a zombie is within 4 m of the knocked
+  player, and a bite on the reviver cancels it. Revived at 50 %, then 30 %,
+  then 20 % health.
+- **Extraction.** In the final wave a phone sends `extract {on: true}` while
+  the helicopter's QR code is in its camera and the player is holding the
+  screen. The bar fills only while at least 2 players are holding (1 when
+  only one player is not dead). Letting go pauses it. Holders cannot fire.
 
 ## Protocol (JSON, `t` is the type)
 
@@ -57,7 +74,12 @@ classes and the map), then `lobby` on every roster change.
 | `ready` `set_class` `start {lat?, lon?}` | `welcome` `lobby` `started` |
 | `pos {x, y, acc, heading, pitch}` ~8 Hz | `snap` 10 Hz |
 | `fire {seq, hits, heading}` `reload` | `fired` `zhit` `zkill` `reload` `reloaded` |
-| `reset` (host) `leave` `ping` | `hurt {dir}` `knocked` `wave` `ended` `error` |
+| `revive {target, on}` | `hurt {dir}` `knocked` `revived` `dead` |
+| `extract {on}` `arrived` (host) | `phase` `wave` `extract {progress, holders, need}` |
+| `reset` (host) `leave` `ping` | `ended {outcome, results}` `error` |
+
+The gun messages in the spec (`pair_gun`, `/device`, `trigger`, `reload_btn`)
+are not built yet; phones use their on-screen Fire and Reload.
 
 ## Tuning
 

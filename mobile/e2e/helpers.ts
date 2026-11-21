@@ -29,6 +29,7 @@ declare global {
       aim: (heading: number, pitch?: number) => void;
       step: (n?: number) => void;
       fix: (lat: number, lon: number, acc?: number, snap?: boolean) => void;
+      qr: (data: string | null) => void;
     };
     __loonieStore?: { getState: () => Record<string, any> };
     __loonieZombies?: { latest: () => ZRow[] };
@@ -128,7 +129,8 @@ export async function shootNearest(page: Page, want: 'any' | 'mine' = 'any'): Pr
   if (!(await faceNearest(page, want))) return false;
   // The sight has to actually be on it before the trigger does anything useful.
   await page.locator('[data-testid=reticle][aria-label="on target"]').waitFor({ timeout: 1500 }).catch(() => {});
-  await page.getByTestId('fire').click();
+  // Never wait long for the trigger: if the mission just ended there is no Fire button any more.
+  await page.getByTestId('fire').click({ timeout: 1500 }).catch(() => {});
   return true;
 }
 
@@ -141,6 +143,24 @@ export async function fightUntil(page: Page, done: () => Promise<boolean>, opts:
     await page.waitForTimeout(fired ? opts.everyMs ?? 380 : 120);
   }
 }
+
+/** Press and keep holding an on-screen control (revive, extract). */
+export async function holdDown(page: Page, testId: string): Promise<void> {
+  const box = (await page.getByTestId(testId).boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+}
+
+export const release = (page: Page) => page.mouse.up();
+
+/** Hold a QR code up to this phone's camera, or take it away. */
+export const showQr = (page: Page, data: string | null) => page.evaluate((d) => window.__loonieSim!.qr(d), data);
+
+/** This player's own entry in the newest snapshot. */
+export const me = (page: Page) => page.evaluate(() => {
+  const s = window.__loonieStore!.getState();
+  return (s.squad as any[]).find((p) => p.id === s.session?.playerId) as { st: string; hp: number; bl: number; rv: number; x: number; y: number } | undefined;
+});
 
 export const hud = {
   hp: async (page: Page) => parseInt((await page.getByTestId('hp').textContent()) ?? '', 10),

@@ -37,6 +37,8 @@ interface State {
   /** Bumped by every `started`, so the tracker knows to re-anchor the map. */
   missionSeq: number;
   mission: MissionState;
+  /** Hold-to-extract during the final wave. */
+  extract: { progress: number; need: number; holders: string[] };
   squad: PlayerSnap[];
   zombieCount: number;
   ammo: number;
@@ -65,7 +67,8 @@ interface State {
 
 const KEY = 'loonie.prefs.v2';
 const DEFAULT_URL = 'ws://localhost:8000/ws';
-const NO_MISSION: MissionState = { phase: 'journey', wave: 0, left: 0, total: 0 };
+const NO_MISSION: MissionState = { phase: 'journey', wave: 0, left: 0, total: 0, hold: [0, 2] };
+const NO_EXTRACT = { progress: 0, need: 2, holders: [] as string[] };
 
 /**
  * Where to find the game server before the user has set one.
@@ -105,6 +108,7 @@ export const useStore = create<State>((set, get) => ({
   serverOffset: 0,
   missionSeq: 0,
   mission: NO_MISSION,
+  extract: NO_EXTRACT,
   squad: [],
   zombieCount: 0,
   ammo: 0,
@@ -156,7 +160,7 @@ export const useStore = create<State>((set, get) => ({
         set({
           phase: 'playing', roomPhase: 'playing', map: m.map, mission: m.mission, serverOffset: m.now - now,
           missionSeq: s.missionSeq + 1, ended: null,
-          ...(fresh ? { ammo: cls?.magazine ?? 0, reloadingUntil: 0, shots: [], damages: [], feed: [], squad: [], zombieCount: 0 } : {}),
+          ...(fresh ? { ammo: cls?.magazine ?? 0, reloadingUntil: 0, shots: [], damages: [], feed: [], squad: [], zombieCount: 0, extract: NO_EXTRACT } : {}),
         });
         return;
       }
@@ -168,7 +172,8 @@ export const useStore = create<State>((set, get) => ({
         const me = m.p.find((p) => p.id === myId);
         const next: Partial<State> = {
           squad: m.p, serverOffset, zombieCount: m.z.length,
-          mission: { phase: m.ph, wave: m.wave[0], left: m.wave[1], total: m.wave[2] },
+          mission: { phase: m.ph, wave: m.wave[0], left: m.wave[1], total: m.wave[2], hold: m.hold },
+          extract: { progress: m.ex[0], need: m.ex[1], holders: m.ex[2] },
         };
         if (me) { next.ammo = me.ammo; next.reloadingUntil = me.rl; }
         if (s.phase !== 'playing' && s.roomPhase === 'playing') next.phase = 'playing';
@@ -198,9 +203,26 @@ export const useStore = create<State>((set, get) => ({
       case 'knocked':
         set({ feed: [...s.feed.slice(-5), feedItem(m.player_id === myId ? 'You' : m.name, 'bad', 'knocked')] });
         return;
-      case 'wave':
-        set({ feed: [...s.feed.slice(-5), m.cleared ? feedItem(`Wave ${m.n}`, 'good', 'cleared') : feedItem(`Wave ${m.n}`, 'plain', `${m.count ?? ''} incoming`)] });
+      case 'revived':
+        set({ feed: [...s.feed.slice(-5), feedItem(m.by === myId ? 'You' : m.by_name, 'good', `revived ${m.player_id === myId ? 'you' : m.name}`)] });
         return;
+      case 'dead':
+        set({ feed: [...s.feed.slice(-5), feedItem(m.player_id === myId ? 'You' : m.name, 'bad', m.player_id === myId ? 'are dead' : 'is dead')] });
+        return;
+      case 'phase': {
+        const item = m.phase === 'holdout' ? feedItem('Helicopter reached', 'good', `hold for ${m.hold?.[1] ?? 2} waves`)
+          : m.phase === 'final' ? feedItem('Final wave', 'bad', 'extract now') : null;
+        set({ mission: { ...s.mission, phase: m.phase, hold: m.hold ?? s.mission.hold }, ...(item ? { feed: [...s.feed.slice(-5), item] } : {}) });
+        return;
+      }
+      case 'extract':
+        set({ extract: { progress: m.progress, need: m.need, holders: m.holders } });
+        return;
+      case 'wave': {
+        const label = m.phase === 'final' ? 'Final wave' : `Wave ${m.n}`;
+        set({ feed: [...s.feed.slice(-5), m.cleared ? feedItem(label, 'good', 'cleared') : feedItem(label, 'plain', `${m.count ?? ''} incoming`)] });
+        return;
+      }
       case 'reload':
         if (m.player_id === myId) set({ reloadingUntil: m.until });
         return;
@@ -223,7 +245,7 @@ export const useStore = create<State>((set, get) => ({
     zombies.clear();
     set({
       phase: 'menu', session: null, hostId: null, roster: [], settings: null, roomPhase: 'lobby',
-      ended: null, feed: [], shots: [], damages: [], squad: [], mission: NO_MISSION, zombieCount: 0,
+      ended: null, feed: [], shots: [], damages: [], squad: [], mission: NO_MISSION, extract: NO_EXTRACT, zombieCount: 0,
       error: null, connection: 'idle',
     });
     persist(get, null);

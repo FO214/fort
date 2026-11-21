@@ -30,7 +30,7 @@ def test_grace_then_first_wave_trickles_in():
     t, ev = run(m, T0 + 4.9)
     assert ev == [] and m.wave == 0 and not world.zombies
     t, ev = run(m, T0 + 5.2, t)
-    assert ev == [{"t": "wave", "n": 1, "count": m.wave_size(1), "cleared": False}]
+    assert ev == [{"t": "wave", "n": 1, "count": m.wave_size(1), "cleared": False, "phase": "journey"}]
     assert len(world.zombies) == 1                              # one now, the rest staggered
     t, ev = run(m, T0 + 5.2 + 0.5 * m.wave_size(1), t)
     assert len(world.zombies) == m.wave_size(1) and m.to_spawn == 0
@@ -52,7 +52,7 @@ def test_clearing_a_wave_earns_a_rest_then_the_next_wave():
     for zid in list(world.zombies):
         world.damage(zid, 99)
     t, ev = run(m, t + 0.1, t)
-    assert ev == [{"t": "wave", "n": 1, "cleared": True, "next_in": 4}]
+    assert ev == [{"t": "wave", "n": 1, "cleared": True, "next_in": 4, "phase": "journey"}]
     t, ev = run(m, t + 3.5, t)
     assert ev == [] and m.wave == 1                              # still resting
     t, ev = run(m, t + 1.0, t)
@@ -77,6 +77,92 @@ def test_zombie_cap_holds_spawns_back():
     world.damage(next(iter(world.zombies)), 99)
     t, _ = run(m, t + 0.2, t)
     assert len(world.zombies) == 3                               # the freed slot is refilled
+
+
+# ------------------------------------------------------------------ the helicopter
+
+def kill_all(world):
+    for zid in list(world.zombies):
+        world.damage(zid, 99)
+
+
+def test_arriving_starts_the_holdout_after_a_short_grace():
+    m, world = make(grace_s=1, spawn_gap_s=0.1, hold_grace_s=3, rest_s=2)
+    t, _ = run(m, T0 + 2)
+    journey_wave = m.wave
+    followers = len(world.zombies)
+    assert m.arrive(t) == [{"t": "phase", "phase": "holdout", "hold": [0, 2]}]
+    assert m.arrive(t) == []                                     # only once
+    t, ev = run(m, t + 2.9, t)
+    assert ev == [] and len(world.zombies) == followers          # what followed them is still there
+    t, ev = run(m, t + 0.3, t)
+    assert ev == [{"t": "wave", "n": journey_wave + 1, "count": m.wave_size(journey_wave + 1),
+                   "cleared": False, "phase": "holdout", "hold": [0, 2]}]
+
+
+def test_two_holdout_waves_then_the_final_wave():
+    m, world = make(grace_s=1, spawn_gap_s=0.05, hold_grace_s=1, rest_s=2, wave_max_s=5)
+    t, _ = run(m, T0 + 1.5)
+    m.arrive(t)
+    t, _ = run(m, t + 2, t)                                      # holdout wave 1 is in
+    assert m.phase == "holdout" and m.hold_done == 0
+    t, ev = run(m, t + 20, t)                                    # nobody clears it: it does not time out
+    assert ev == [] and m.hold_done == 0
+
+    kill_all(world)
+    t, ev = run(m, t + 0.1, t)
+    assert ev == [{"t": "wave", "n": m.wave, "cleared": True, "next_in": 2, "phase": "holdout",
+                   "hold": [1, 2]}]
+    t, ev = run(m, t + 3, t)                                     # rest, then holdout wave 2
+    assert [e["hold"] for e in ev] == [[1, 2]] and m.to_spawn == 0
+
+    kill_all(world)
+    t, ev = run(m, t + 0.1, t)
+    assert [e["t"] for e in ev] == ["wave", "phase", "wave"]
+    assert ev[0]["cleared"] and ev[0]["hold"] == [2, 2]
+    assert ev[1] == {"t": "phase", "phase": "final"}
+    assert ev[2]["phase"] == "final" and not ev[2]["cleared"]
+    # The final wave opens bigger than an ordinary wave of that number.
+    assert ev[2]["count"] == int(m.wave_size(m.wave) * 1.3 + 0.5) > m.wave_size(m.wave)
+
+
+def test_the_final_wave_keeps_coming():
+    m, world = make(players=4, grace_s=0, spawn_gap_s=0.05, hold_grace_s=0, rest_s=0, holdout_waves=1)
+    m.arrive(T0)
+    t, _ = run(m, T0 + 2)
+    kill_all(world)
+    t, _ = run(m, t + 3, t)
+    assert m.phase == "final" and len(world.zombies) == m.wave_total
+    floor = int(m.wave_total * 0.6 + 0.5)
+    for _ in range(4):                                           # wipe them out again and again
+        kill_all(world)
+        t, ev = run(m, t + 3, t)
+        assert ev == [] and len(world.zombies) == floor          # never fewer than this for long
+    assert m.phase == "final"
+
+
+def test_extraction_needs_enough_holders_and_pauses_without_them():
+    m, world = make(grace_s=0, hold_grace_s=0, rest_s=0, holdout_waves=1, spawn_gap_s=0.01, extract_s=10)
+    assert m.extract(1.0, ["a", "b"], 2) == []                   # not at the helicopter yet
+    m.arrive(T0)
+    t, _ = run(m, T0 + 1)
+    kill_all(world)
+    run(m, t + 0.2, t)
+    assert m.phase == "final"
+
+    assert m.extract(1.0, ["a"], 2) == [{"t": "extract", "progress": 0.0, "holders": ["a"], "need": 2}]
+    assert m.extract(1.0, ["a"], 2) == [] and m.extract_progress == 0          # one is not enough
+    ev = m.extract(1.0, ["a", "b"], 2)
+    assert ev == [{"t": "extract", "progress": 0.1, "holders": ["a", "b"], "need": 2}]
+    for _ in range(4):
+        assert m.extract(1.0, ["a", "b"], 2) == []               # steady hold: no chatter
+    assert m.extract_progress == pytest.approx(0.5)
+    assert m.extract(1.0, ["b"], 2)[0]["holders"] == ["b"]       # one lets go
+    assert m.extract_progress == pytest.approx(0.5)              # paused, not reset
+    m.extract(1.0, ["b", "a"], 2)
+    for _ in range(4):
+        m.extract(1.0, ["b", "a"], 2)
+    assert m.extract_progress == pytest.approx(1.0) and m.phase == "extracted"
 
 
 def test_tuning_comes_from_the_environment(monkeypatch):

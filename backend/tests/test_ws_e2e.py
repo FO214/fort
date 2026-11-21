@@ -13,7 +13,10 @@ from app import main
 from app.mission import Tuning
 from app.models import CLASSES
 
-FAST = Tuning(grace_s=0.3, rest_s=0.6, spawn_gap_s=0.1, zombie_speed=3.0)
+# Same rules, shorter waits. Zombies are fast but fall to one Regular shot,
+# so a squad that is shooting stays on its feet and the tests stay quick.
+FAST = Tuning(grace_s=0.3, rest_s=0.6, spawn_gap_s=0.1, zombie_speed=3.0, zombie_hp=0.34,
+              hold_grace_s=0.3, extract_s=1.5, revive_s=0.6, bleed_bites=80)
 
 
 def free_port() -> int:
@@ -58,14 +61,18 @@ class Client:
                 return m
         raise AssertionError(f"never saw {kind} {match}")
 
-    async def fresh_snap(self) -> dict:
-        """Throw away whatever queued up while this phone was not reading, then
-        wait for the next snapshot, so aim is taken at current positions."""
+    async def drain(self) -> None:
+        """Read whatever queued up while this phone was not listening."""
         while True:
             try:
                 await self.recv(timeout=0.001)
             except asyncio.TimeoutError:
-                break
+                return
+
+    async def fresh_snap(self) -> dict:
+        """Skip the backlog, then wait for the next snapshot, so aim is taken
+        at current positions."""
+        await self.drain()
         return await self.until("snap")
 
     def me(self, snap=None) -> dict:
@@ -75,13 +82,46 @@ class Client:
         self.x, self.y = x, y
         await self.send(t="pos", x=x, y=y, acc=acc, heading=heading, pitch=0)
 
-    async def shoot_nearest(self) -> dict:
-        """Face the nearest zombie in the newest snapshot and pull the trigger."""
-        z = min(self.snap["z"], key=lambda r: math.hypot(r[2] - self.x, r[3] - self.y))
+    async def shoot_nearest(self, want=None) -> dict | None:
+        """Face the nearest zombie in the newest snapshot (optionally only ones
+        `want` accepts) and pull the trigger. None if there was nothing to shoot."""
+        rows = [r for r in self.snap["z"] if want is None or want(r)]
+        if not rows:
+            return None
+        z = min(rows, key=lambda r: math.hypot(r[2] - self.x, r[3] - self.y))
         heading = math.degrees(math.atan2(z[2] - self.x, z[3] - self.y)) % 360
         self.seq += 1
         await self.send(t="fire", seq=self.seq, hits=[z[0]], heading=heading)
         return await self.until("fired", player_id=self.id, seq=self.seq)
+
+    def saw(self, kind, **match) -> dict | None:
+        """The first message of that kind this phone has received, if any."""
+        return next((m for m in self.inbox
+                     if m["t"] == kind and all(m.get(k) == v for k, v in match.items())), None)
+
+
+async def fight(shooters, done, want=None, each=None, timeout=40.0):
+    """The shooters take turns: fresh snapshot, shoot the nearest zombie.
+    Stops when `done()` is truthy. `each` runs once per round (to keep
+    resending something)."""
+    deadline = time.time() + timeout
+    turn = 0
+    while True:
+        for c in shooters:
+            await c.drain()
+        if done():
+            return
+        assert time.time() < deadline, "fight timed out"
+        s = shooters[turn % len(shooters)]
+        turn += 1
+        try:
+            await s.until("snap", timeout=1.0)
+        except AssertionError:
+            continue                       # no snapshot: the mission may just have ended
+        if s.me()["st"] == "alive":
+            await s.shoot_nearest(None if want is None else (lambda r, s=s: want(r, s)))
+        if each and turn % len(shooters) == 0:
+            await each()
 
 
 @pytest.fixture
@@ -157,7 +197,7 @@ async def test_four_phones_fight_a_wave(server):
 
     # The first wave arrives: 8 zombies for four players, identical on every phone.
     wave = await ada.until("wave", cleared=False)
-    assert wave == {"t": "wave", "n": 1, "count": 8, "cleared": False}
+    assert wave == {"t": "wave", "n": 1, "count": 8, "cleared": False, "phase": "journey"}
     a = await ada.until("snap", pred=lambda m: len(m["z"]) == 8)
     b = await bo.until("snap", pred=lambda m: m["now"] == a["now"])
     assert a["z"] == b["z"] and a["ph"] == "journey"
@@ -203,6 +243,97 @@ async def test_four_phones_fight_a_wave(server):
     assert not any(p["ready"] for p in lobby["players"])
 
     for c in (ada, bo, cy2, di, bad):
+        await c.ws.close()
+
+
+@pytest.mark.asyncio
+async def test_full_mission_with_four_phones(server):
+    """Journey, a knock and a revive, arrival, two holdout waves, then two
+    players hold to extract while the other two defend."""
+    (ada, bo, cy, di), _ = await squad(server, ["Ada", "Bo", "Cy", "Di"])
+    everyone = (ada, bo, cy, di)
+    await ada.send(t="start", lat=43.4723, lon=-80.5449)
+    for c in everyone:
+        st = await c.until("started")
+    heli = st["map"]["helicopter"]
+
+    # Three stay together. Di wanders off alone and does not shoot.
+    await ada.pos(0, 0)
+    await bo.pos(2, 0)
+    await cy.pos(0, 2)
+    await di.pos(30, -30)
+    trio = (ada, bo, cy)
+    trio_ids = {c.id for c in trio}
+    await fight(trio, lambda: ada.saw("knocked", player_id=di.id) or bo.saw("knocked", player_id=di.id)
+                or cy.saw("knocked", player_id=di.id), want=lambda row, s: row[6] in trio_ids)
+    snap = await di.fresh_snap()
+    assert di.me(snap)["st"] == "knocked" and di.me(snap)["hp"] == 0
+    await di.send(t="fire", seq=1, hits=[], heading=0)           # the knocked cannot shoot
+    await asyncio.sleep(0.2)
+    assert not any(m["t"] == "fired" and m["player_id"] == di.id for m in di.inbox + ada.inbox)
+
+    # Revive from across the map is refused...
+    await ada.send(t="revive", target=di.id, on=True)
+    assert "far" in (await ada.until("error"))["msg"]
+    # ...so the trio goes to her, clears the zombies off her, and Ada holds Revive.
+    await ada.pos(30, -28)
+    await bo.pos(32, -30)
+    await cy.pos(28, -30)
+
+    async def hold_revive():
+        await ada.send(t="revive", target=di.id, on=True)
+
+    await fight(trio, lambda: any(c.saw("revived", player_id=di.id) for c in trio), each=hold_revive)
+    revived = next(c.saw("revived", player_id=di.id) for c in trio if c.saw("revived", player_id=di.id))
+    assert revived["by"] == ada.id and revived["hp"] == 4        # half of a Regular's 8
+    snap = await di.fresh_snap()
+    assert di.me(snap)["st"] == "alive" and di.me(snap)["hp"] <= 4
+
+    # Extraction is not available on the way.
+    await ada.send(t="extract", on=True)
+    snap = await ada.fresh_snap()
+    assert snap["ph"] == "journey" and ada.me(snap)["ex"] is False
+
+    # Walk to the helicopter: arriving starts the holdout.
+    for i, c in enumerate(everyone):
+        await c.pos(heli["x"] + i - 1.5, heli["y"] - 1)
+    phase = await ada.until("phase", timeout=5)
+    assert phase == {"t": "phase", "phase": "holdout", "hold": [0, 2]}
+
+    # Hold for two waves; the final wave follows.
+    await fight(everyone, lambda: any(c.saw("phase", phase="final") for c in everyone), timeout=60)
+    cleared = [m["hold"] for m in ada.inbox + bo.inbox + cy.inbox + di.inbox
+               if m["t"] == "wave" and m["cleared"] and m["phase"] == "holdout"]
+    assert [1, 2] in cleared and [2, 2] in cleared
+
+    # One phone on the QR is not enough.
+    snap = await ada.fresh_snap()
+    assert ada.me(snap)["st"] == bo.me(snap)["st"] == "alive", "the two who will extract must be standing"
+    await ada.send(t="extract", on=True)
+    await fight((cy, di), lambda: any(m["t"] == "extract" and m["holders"] == [ada.id]
+                                      for m in cy.inbox + di.inbox))
+    await asyncio.sleep(0.5)
+    snap = await bo.fresh_snap()
+    assert snap["ph"] == "final" and snap["ex"] == [0, 2, [ada.id]]
+    # A holder's hands are busy.
+    ada.seq += 1
+    await ada.send(t="fire", seq=ada.seq, hits=[], heading=0)
+    assert (await ada.until("fired", player_id=ada.id, seq=ada.seq))["reason"] == "extracting"
+
+    # Bo joins her on the QR while Cy and Di keep the zombies off them.
+    await bo.send(t="extract", on=True)
+    await fight((cy, di), lambda: cy.saw("ended") or di.saw("ended"), timeout=20)
+    ended = cy.saw("ended") or di.saw("ended")
+    assert ended["outcome"] == "extracted"
+    by_name = {r["name"]: r for r in ended["results"]}
+    assert by_name["Ada"]["revives"] == 1 and by_name["Di"]["knocks"] == 1
+    assert all(r["state"] == "alive" for r in ended["results"])
+    assert ended["kills"] == sum(r["kills"] for r in ended["results"]) > 20
+
+    # Play again.
+    await ada.send(t="reset")
+    await di.until("lobby", phase="lobby")
+    for c in everyone:
         await c.ws.close()
 
 

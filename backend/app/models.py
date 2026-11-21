@@ -102,6 +102,25 @@ class Reload(BaseModel):
     t: Literal["reload"]
 
 
+class Revive(BaseModel):
+    """Hold (`on`) or release the Revive button for a knocked teammate."""
+    t: Literal["revive"]
+    target: str
+    on: bool
+
+
+class Extract(BaseModel):
+    """`on` while this phone has the helicopter's QR code in view and the
+    player is holding the screen."""
+    t: Literal["extract"]
+    on: bool
+
+
+class Arrived(BaseModel):
+    """Host only: "we're here", for when GPS will not admit it."""
+    t: Literal["arrived"]
+
+
 class Leave(BaseModel):
     t: Literal["leave"]
 

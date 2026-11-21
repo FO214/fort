@@ -1,4 +1,5 @@
 """Room rules with a fake clock: no sockets, no sleeping."""
+import math
 import random
 
 import pytest
@@ -280,3 +281,349 @@ def test_host_can_abort_and_play_again():
     assert r.snapshot(T0)["z"] == []
     r.start(a.id, T0 + 10)
     assert r.phase == "playing" and a.hp == 8
+
+
+# ------------------------------------------------------------------ knocked, bleed-out, revive
+
+def knock(r, p, t):
+    """Stand a zombie on `p` until they go down. Returns (time, zombie)."""
+    z = r.world.spawn(WALKER, p.x, p.y + 1.0)
+    for _ in range(2000):
+        if p.state != "alive":
+            return t, z
+        t += 0.05
+        r.tick(t)
+    raise AssertionError(f"{p.name} never went down")
+
+
+def test_zombies_finish_a_knocked_player_unless_someone_stops_them():
+    r, a, b = make_room(bleed_bites=8)
+    r.start(a.id, T0)
+    place(r, a, 0, 0)
+    place(r, b, 60, 60)                                # too far away to matter
+    t, z = knock(r, a, T0)
+    assert a.state == "knocked" and a.bleed == 1.0 and a.knocks == 1
+    assert z.target == a.id                             # it stays on her
+    t, ev = run(r, 4.5, t)                              # four more bites, one a second
+    drains = [e for e in ev if e["t"] == "hurt"]
+    assert [e["bleed"] for e in drains] == [0.875, 0.75, 0.625, 0.5]
+    assert all(e["hp"] == 0 and e["dmg"] == 0 for e in drains)
+    t, ev = run(r, 4.02, t)
+    assert a.state == "dead" and a.bleed == 0
+    assert {"t": "dead", "player_id": a.id, "name": "Ada"} in ev
+    assert r.phase == "playing"                         # Bo is still standing
+    t, _ = run(r, 0.5, t)
+    assert z.target == b.id                             # the dead are left alone
+
+
+def test_knocked_player_is_safe_while_no_zombie_reaches_them():
+    r, a, b = make_room()
+    r.start(a.id, T0)
+    place(r, a, 0, 0)
+    place(r, b, 3, 0)
+    t, z = knock(r, a, T0)
+    r.world.damage(z.id, 99)                            # Bo shoots it off her
+    t, ev = run(r, 60, t)
+    assert a.state == "knocked" and a.bleed == 1.0      # waits as long as it takes
+
+
+def test_revive_takes_a_three_second_hold_and_brings_them_back_at_half_health():
+    r, a, b = make_room(revive_s=3)
+    r.start(a.id, T0)
+    place(r, a, 0, 0)
+    place(r, b, 2, 0)
+    t, z = knock(r, a, T0)
+    r.world.damage(z.id, 99)
+    assert r.revive(b.id, a.id, True, t) == []
+    t, ev = run(r, 1.5, t)
+    assert a.revive_by == b.id and a.revive_progress == pytest.approx(0.5, abs=0.02)
+    wire = next(p for p in r.snapshot(t)["p"] if p["id"] == a.id)
+    assert wire["st"] == "knocked" and wire["rb"] == b.id and 0.45 < wire["rv"] < 0.55
+    t, ev = run(r, 1.6, t)
+    assert ev == [{"t": "revived", "player_id": a.id, "name": "Ada", "by": b.id,
+                   "by_name": "Bo", "hp": 4}]
+    assert a.state == "alive" and a.hp == 4 and a.revive_by is None and b.reviving is None
+    assert b.revives == 1
+
+
+def test_each_revive_brings_back_less_health():
+    r, a, b = make_room(revive_s=1)
+    r.start(a.id, T0)
+    place(r, a, 0, 0)
+    place(r, b, 2, 0)
+    t, healths = T0, []
+    for _ in range(4):
+        t, z = knock(r, a, t)
+        r.world.damage(z.id, 99)
+        r.revive(b.id, a.id, True, t)
+        t, _ = run(r, 1.2, t)
+        healths.append(a.hp)
+    assert healths == [4, 3, 2, 2]                      # 50 %, 30 %, 20 %, 20 % of 8, rounded up
+
+
+def test_letting_go_starts_the_revive_over():
+    r, a, b = make_room(revive_s=3)
+    r.start(a.id, T0)
+    place(r, a, 0, 0)
+    place(r, b, 2, 0)
+    t, z = knock(r, a, T0)
+    r.world.damage(z.id, 99)
+    r.revive(b.id, a.id, True, t)
+    t, _ = run(r, 2, t)
+    r.revive(b.id, a.id, False, t)
+    assert a.revive_by is None and a.revive_progress == 0
+    r.revive(b.id, a.id, True, t)
+    t, _ = run(r, 2, t)
+    assert a.state == "knocked"                         # two seconds is not three
+
+
+def test_no_revive_with_a_zombie_on_top_of_them():
+    r, a, b = make_room(revive_s=1, bleed_bites=1000)
+    r.start(a.id, T0)
+    place(r, a, 0, 0)
+    place(r, b, 9, 0)                                   # in reach with GPS slack, but the zombie prefers Ada
+    t, z = knock(r, a, T0)
+    r.revive(b.id, a.id, True, t)
+    t, _ = run(r, 3, t)
+    assert a.state == "knocked" and a.revive_progress == 0 and a.revive_by == b.id
+    r.world.damage(z.id, 99)                            # clear the area...
+    t, ev = run(r, 1.1, t)
+    assert a.state == "alive" and kinds(ev) == ["revived"]   # ...and the same hold now works
+
+
+def test_getting_bitten_breaks_the_revive_you_were_doing():
+    r, a, b = make_room(revive_s=3)
+    r.start(a.id, T0)
+    place(r, a, 0, 0)
+    place(r, b, 9, 0)
+    t, z = knock(r, a, T0)
+    r.world.damage(z.id, 99)
+    r.revive(b.id, a.id, True, t)
+    t, _ = run(r, 1, t)
+    assert a.revive_progress > 0.3
+    r.world.spawn(WALKER, 9, 1.0)                      # one gets to Bo
+    t, ev = run(r, 0.8, t)
+    assert "hurt" in kinds(ev) and b.reviving is None
+    assert a.revive_by is None and a.revive_progress == 0 and a.state == "knocked"
+
+
+def test_revive_range_allows_for_gps_error_but_not_the_whole_building():
+    r, a, b = make_room()
+    r.start(a.id, T0)
+    place(r, a, 0, 0, acc=3)
+    place(r, b, 12, 0, acc=3)                           # 4 m + 3 + 3 = 10 m: too far
+    t, z = knock(r, a, T0)
+    r.world.damage(z.id, 99)
+    with pytest.raises(GameError, match="far"):
+        r.revive(b.id, a.id, True, t)
+    place(r, b, 9, 0, acc=3)
+    r.revive(b.id, a.id, True, t)
+    assert a.revive_by == b.id
+    r.revive(b.id, a.id, False, t)
+    # Poor GPS on both phones: standing together can read as 25 m apart.
+    place(r, a, 0, 0, acc=20)
+    place(r, b, 25, 0, acc=20)                          # 4 + min(40, 25) = 29 m
+    r.revive(b.id, a.id, True, t)
+    assert a.revive_by == b.id
+    place(r, b, 40, 0, acc=20)                          # walked off: the hold drops on the next tick
+    r.tick(t + 0.05)
+    assert a.revive_by is None
+
+
+def test_only_the_standing_can_revive_and_only_the_knocked_need_it():
+    r, a, b, c = make_room(names=("Ada", "Bo", "Cy"))
+    r.start(a.id, T0)
+    for p in (a, b, c):
+        place(r, p, 0, 0)
+    assert r.revive(b.id, a.id, True, T0) == [] and b.reviving is None     # Ada is fine
+    assert r.revive(b.id, b.id, True, T0) == [] and b.reviving is None     # not yourself
+    place(r, b, 30, 30); place(r, c, 30, 30)
+    t, z = knock(r, a, T0)
+    r.world.damage(z.id, 99)
+    place(r, b, 1, 0); place(r, c, 0, 1)
+    r.revive(b.id, a.id, True, t)
+    r.revive(c.id, a.id, True, t)                       # Bo already has her
+    assert a.revive_by == b.id and c.reviving is None
+    assert r.revive(a.id, b.id, True, t) == [] and a.reviving is None      # knocked players cannot
+
+
+# ------------------------------------------------------------------ the helicopter
+
+def test_reaching_the_helicopter_starts_the_holdout():
+    r, a, b = make_room()
+    started = r.start(a.id, T0)
+    hx, hy = started["map"]["helicopter"]["x"], started["map"]["helicopter"]["y"]
+    place(r, a, 0, 0)
+    place(r, b, 0, 0)
+    assert r.tick(T0 + 0.05) == [] and r.mission.phase == "journey"
+    place(r, b, hx + 7.4, hy, acc=3)                    # radius 6 m + 1.5 m of GPS slack
+    assert r.tick(T0 + 0.1) == [{"t": "phase", "phase": "holdout", "hold": [0, 2]}]
+    assert r.snapshot(T0 + 0.1)["ph"] == "holdout" and r.snapshot(T0 + 0.1)["hold"] == [0, 2]
+
+
+def test_arrival_radius_grows_with_gps_error_only_so_far():
+    r, a, _ = make_room()
+    r.start(a.id, T0)
+    place(r, a, 0, 30 - 15, acc=18)                     # 6 m + 9 m of slack
+    r.tick(T0 + 0.05)
+    assert r.mission.phase == "holdout"
+
+    r, a, _ = make_room()
+    r.start(a.id, T0)
+    place(r, a, 0, 30 - 17, acc=60)                     # slack is capped at 10 m: 16 m in all
+    r.tick(T0 + 0.05)
+    assert r.mission.phase == "journey"
+
+
+def test_a_phone_that_never_reported_does_not_count_as_arrived():
+    r = Room("TEST", Settings(map="arena"), now=T0, tuning=Tuning(**QUIET))
+    a = r.add_player("Ada")
+    r.start(a.id, T0)
+    a.x, a.y = 0, 30                                    # on the helicopter, but nobody told us so
+    r.tick(T0 + 0.05)
+    assert r.mission.phase == "journey"
+
+
+def test_host_can_say_we_are_here():
+    r, a, b = make_room()
+    r.start(a.id, T0)
+    place(r, a, 0, 0); place(r, b, 0, 0)
+    with pytest.raises(GameError):
+        r.arrived(b.id, T0 + 1)
+    assert r.arrived(a.id, T0 + 1) == [{"t": "phase", "phase": "holdout", "hold": [0, 2]}]
+    assert r.arrived(a.id, T0 + 2) == []
+
+
+def to_final(r, a, t, players):
+    """Fast-forward a quiet room to the final wave."""
+    for p in players:
+        place(r, p, 0, 30)
+    r.arrived(a.id, t)
+    for _ in range(2000):
+        if r.mission.phase == "final":
+            break
+        t += 0.05
+        r.tick(t)
+        r.world.clear()                                 # every holdout wave falls at once
+        r.mission.to_spawn = 0
+    else:
+        raise AssertionError("never reached the final wave")
+    r.world.clear()
+    return t
+
+
+HELI = dict(hold_grace_s=0, rest_s=0, spawn_gap_s=10_000, extract_s=4)
+
+
+def test_extraction_needs_two_players_holding_together():
+    r, a, b, c, d = make_room(names=("Ada", "Bo", "Cy", "Di"), **HELI)
+    r.start(a.id, T0)
+    r.set_extract(a.id, True)
+    assert not a.extracting                             # not before the final wave
+    t = to_final(r, a, T0, (a, b, c, d))
+
+    r.set_extract(a.id, True)
+    t, ev = run(r, 2, t)
+    assert [e for e in ev if e["t"] == "extract"] == [
+        {"t": "extract", "progress": 0.0, "holders": [a.id], "need": 2}]
+    assert r.mission.extract_progress == 0              # one phone on the QR is not enough
+
+    r.set_extract(b.id, True)
+    t, ev = run(r, 2, t)
+    assert r.mission.extract_progress == pytest.approx(0.5, abs=0.02)
+    assert r.snapshot(t)["ex"][1:] == [2, [a.id, b.id]]
+    assert r.fire(a.id, 1, [], 0, t)[0]["reason"] == "extracting" and a.ammo == 10   # hands are busy
+    assert r.fire(c.id, 1, [], 0, t)[0]["reason"] == "miss"                          # the others defend
+
+    r.set_extract(b.id, False)                          # Bo lets go: paused, not lost
+    t, _ = run(r, 2, t)
+    assert r.mission.extract_progress == pytest.approx(0.5, abs=0.02)
+
+    r.set_extract(d.id, True)                           # any two will do
+    t, ev = run(r, 2.2, t)
+    ended = ev[-1]
+    assert r.phase == "ended" and ended["outcome"] == "extracted"
+    assert {x["name"]: x["state"] for x in ended["results"]} == dict.fromkeys(["Ada", "Bo", "Cy", "Di"], "alive")
+    assert not a.extracting
+
+
+def test_a_solo_player_extracts_alone():
+    r, a = make_room(names=("Ada",), **HELI)
+    r.start(a.id, T0)
+    t = to_final(r, a, T0, (a,))
+    r.set_extract(a.id, True)
+    t, ev = run(r, 4.2, t)
+    assert ev[-1]["outcome"] == "extracted"
+
+
+def test_a_knocked_holder_drops_off_the_bar():
+    r, a, b = make_room(**{**HELI, "extract_s": 60}, bleed_bites=1000)
+    r.start(a.id, T0)
+    t = to_final(r, a, T0, (a, b))
+    place(r, b, 5, 30)                                  # a few steps from Ada
+    r.set_extract(a.id, True)
+    r.set_extract(b.id, True)
+    t, _ = run(r, 1, t)
+    assert r.mission.extract_progress > 0.01
+    t, z = knock(r, b, t)                               # also proves holders are not immune
+    held = r.mission.extract_progress
+    assert not b.extracting
+    t, _ = run(r, 1, t)
+    assert r.mission.extract_progress == held           # Ada alone cannot finish it while Bo lives
+    r.set_extract(b.id, True)
+    assert not b.extracting                             # and the knocked cannot hold
+
+
+def test_the_last_one_alive_may_extract_alone():
+    r, a, b = make_room(**HELI, bleed_bites=2)
+    r.start(a.id, T0)
+    t = to_final(r, a, T0, (a, b))
+    place(r, b, 40, 80)                                 # Bo wanders off and dies out there
+    t, z = knock(r, b, t)
+    t, _ = run(r, 3, t)
+    assert b.state == "dead"
+    r.world.clear()
+    r.set_extract(a.id, True)
+    t, ev = run(r, 4.2, t)
+    ended = ev[-1]
+    assert ended["outcome"] == "extracted"
+    assert {x["name"]: x["state"] for x in ended["results"]} == {"Ada": "alive", "Bo": "dead"}
+
+
+def test_whole_mission_start_to_helicopter():
+    r, a, b = make_room(grace_s=1, rest_s=1, hold_grace_s=1, spawn_gap_s=0.1, extract_s=2,
+                        revive_s=1, wave_max_s=10_000)
+    r.start(a.id, T0)
+    place(r, a, 0, 0)
+    place(r, b, 1, 0)
+    seen, t, seq = [], T0, 0
+
+    def play(seconds, shoot=True):
+        nonlocal t, seq
+        for _ in range(round(seconds / 0.05)):
+            t += 0.05
+            for e in r.tick(t):
+                seen.append(e)
+            if shoot and r.phase == "playing":
+                for p in (a, b):
+                    zs = sorted(r.world.zombies.values(), key=lambda z: (z.x - p.x) ** 2 + (z.y - p.y) ** 2)
+                    if zs and p.state == "alive":
+                        seq += 1
+                        h = math.degrees(math.atan2(zs[0].x - p.x, zs[0].y - p.y)) % 360
+                        seen.extend(r.fire(p.id, seq, [zs[0].id], h, t))
+
+    play(12)                                            # journey: at least one wave fought off
+    assert any(e["t"] == "wave" and e["cleared"] and e["phase"] == "journey" for e in seen)
+    place(r, a, 0, 29)
+    place(r, b, 1, 29)
+    play(30)                                            # holdout, then into the final wave
+    phases = [e["phase"] for e in seen if e["t"] == "phase"]
+    assert phases == ["holdout", "final"]
+    assert [e["hold"] for e in seen if e["t"] == "wave" and e["cleared"] and e["phase"] == "holdout"] \
+        == [[1, 2], [2, 2]]
+    assert r.phase == "playing" and a.state == b.state == "alive"
+    r.set_extract(a.id, True)
+    r.set_extract(b.id, True)
+    play(2.5, shoot=False)
+    assert r.phase == "ended" and seen[-1]["outcome"] == "extracted"
+    assert seen[-1]["kills"] == a.kills + b.kills > 10

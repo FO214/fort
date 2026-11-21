@@ -27,7 +27,8 @@ DISCONNECT_GRACE_S = 90.0     # keep a dropped player's slot this long for resum
 
 FirstMessage = TypeAdapter(m.Create | m.Join | m.Resume)
 InGameMessage = TypeAdapter(
-    m.Ready | m.SetClass | m.Start | m.Pos | m.Fire | m.Reload | m.Leave | m.Reset | m.Ping
+    m.Ready | m.SetClass | m.Start | m.Pos | m.Fire | m.Reload | m.Revive | m.Extract
+    | m.Arrived | m.Leave | m.Reset | m.Ping
 )
 
 
@@ -246,6 +247,14 @@ async def handle(room: Room, p: Player, msg: Any, now: float, ws: WebSocket) -> 
         await hub.broadcast(code, room.snapshot(now))
     elif isinstance(msg, m.Reload):
         for e in room.reload(p.id, now):
+            await hub.broadcast(code, e)
+    elif isinstance(msg, m.Revive):
+        for e in room.revive(p.id, msg.target, msg.on, now):
+            await hub.broadcast(code, e)
+    elif isinstance(msg, m.Extract):
+        room.set_extract(p.id, msg.on)
+    elif isinstance(msg, m.Arrived):
+        for e in room.arrived(p.id, now):
             await hub.broadcast(code, e)
     elif isinstance(msg, m.Reset):
         room.reset(p.id)

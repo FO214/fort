@@ -82,6 +82,12 @@ class NetClient {
   }
 
   reload() { this.send({ t: 'reload' }); }
+  /** Press (`on`) or release the Revive hold for a knocked teammate. */
+  revive(target: string, on: boolean) { this.send({ t: 'revive', target, on }); }
+  /** `on` while the helicopter's QR is in view and the player is holding. */
+  extract(on: boolean) { this.send({ t: 'extract', on }); }
+  /** Host only: "we're here", when GPS will not admit it. */
+  arrived() { this.send({ t: 'arrived' }); }
   ready(ready: boolean) { this.send({ t: 'ready', ready }); }
   setClass(cls: string) { this.send({ t: 'set_class', cls }); }
   /** Host only. The fix (if any) anchors a map that has no fixed place in the world. */

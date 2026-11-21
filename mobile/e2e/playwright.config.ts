@@ -21,13 +21,16 @@ const CAMERA = ensureFakeCamera(path.join(__dirname, 'output'));
 export const BACKEND = 8010;
 export const WEB = 8082;
 
-// A whole mission in well under a minute. Same rules, shorter waits.
+// A whole mission in about a minute. Same rules, shorter waits and smaller
+// waves (a full squad's first wave is 5 zombies here, 8 in the real game).
 const TUNING = JSON.stringify({
-  grace_s: 2, rest_s: 3, spawn_gap_s: 0.3, zombie_speed: 2,
+  grace_s: 2, rest_s: 2, spawn_gap_s: 0.3, zombie_speed: 2, wave_base: 1.5, wave_growth: 0.6,
+  hold_grace_s: 2, extract_s: 4, revive_s: 2, bleed_bites: 24,
 });
 
 export default defineConfig({
   testDir: '.',
+  globalSetup: './globalSetup.ts',
   testMatch: /.*\.spec\.ts/,
   timeout: 120_000,
   expect: { timeout: 8_000 },

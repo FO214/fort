@@ -19,8 +19,16 @@ export function Squad({ mates, nameOf }: { mates: PlayerSnap[]; nameOf: (id: str
           <Glass key={p.id} radius={radius.pill} tint={tint} testID={`mate-${nameOf(p.id)}`}
             contentStyle={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingHorizontal: 10, height: 26, opacity: p.on ? 1 : 0.5 }}>
             <T v="caption" c={down ? tint : color.ink} style={{ fontWeight: '600', maxWidth: 84 }} numberOfLines={1}>{nameOf(p.id)}</T>
-            {down ? (
-              <T v="label" c={tint} style={{ fontSize: 10 }}>{p.st === 'knocked' ? 'down' : 'dead'}</T>
+            {p.st === 'dead' ? (
+              <T v="label" c={tint} style={{ fontSize: 10 }}>dead</T>
+            ) : down ? (
+              <>
+                <T v="label" c={tint} style={{ fontSize: 10 }}>{p.rb ? 'reviving' : 'down'}</T>
+                {/* Being revived: the revive filling. Otherwise: the bleed-out bar draining. */}
+                <View style={{ width: 30, height: 4, borderRadius: 2, backgroundColor: color.ink4, overflow: 'hidden' }}>
+                  <View style={{ width: `${(p.rb ? p.rv : p.bl) * 100}%`, height: 4, backgroundColor: p.rb ? color.accent : color.danger }} />
+                </View>
+              </>
             ) : (
               <View style={{ width: 44, height: 4, borderRadius: 2, backgroundColor: color.ink4, overflow: 'hidden' }}>
                 <View style={{ width: `${frac * 100}%`, height: 4, backgroundColor: bar }} />

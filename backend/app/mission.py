@@ -33,6 +33,19 @@ class Tuning:
     max_zombies: int = 40            # hard cap on zombies alive at once
     zombie_speed: float = 1.0        # multipliers on the zombie type's own numbers
     zombie_hp: float = 1.0
+    # the helicopter
+    arrive_slack_cap_m: float = 10.0 # arrival radius grows by half the GPS accuracy, up to this
+    holdout_waves: int = 2           # waves to survive at the helicopter
+    hold_grace_s: float = 4.0        # quiet time between arriving and the first of them
+    final_factor: float = 1.3        # the final wave opens this much bigger than the next wave would be
+    final_pressure: float = 0.6      # ...and is topped up to this share of its size until you leave
+    extract_s: float = 12.0          # how long the hold-to-extract takes
+    # knocked players
+    bleed_bites: int = 8             # bites a knocked player survives before dying
+    revive_s: float = 3.0            # how long a teammate must hold Revive
+    revive_range_m: float = 4.0      # ...from this close (plus GPS slack)
+    revive_slack_cap_m: float = 25.0 # the two phones' GPS accuracies are added to the range, up to this
+    revive_clear_m: float = 4.0      # no zombie may be this close to the knocked player
 
     @classmethod
     def from_env(cls) -> "Tuning":
@@ -47,8 +60,18 @@ class Tuning:
         return cls(**data)
 
 
+# How much health a revived player comes back with: first time, second, later.
+REVIVE_HEALTH = (0.5, 0.3, 0.2)
+
+
 class Mission:
-    """One run of the mission, from the moment the host presses start."""
+    """One run of the mission, from the moment the host presses start.
+
+    Phases: `journey` (walk to the helicopter, waves on the way) → `holdout`
+    (survive a fixed number of waves there) → `final` (an endless last wave
+    while the squad holds to extract) → `extracted`. The room ends the run
+    as `wiped` if nobody is left standing.
+    """
 
     def __init__(self, world: World, game_map: MapData, tuning: Tuning, players: int,
                  now: float, rng: Optional[random.Random] = None) -> None:
@@ -65,6 +88,11 @@ class Mission:
         self.wave_started_at = now
         self.next_spawn_at = now
         self.next_wave_at: Optional[float] = now + tuning.grace_s
+        self.hold_done = 0                  # holdout waves survived
+        self.hold_wave_live = False         # a holdout wave is in progress
+        self.extract_progress = 0.0         # 0..1
+        self.extract_holders: list[str] = []
+        self.extract_need = 1
 
     # ---- sizing --------------------------------------------------------------
     def wave_size(self, n: int) -> int:
@@ -90,27 +118,102 @@ class Mission:
             self.to_spawn -= 1
             self.next_spawn_at = now + self.t.spawn_gap_s
 
-        cleared = self.wave > 0 and self.remaining == 0
-        if cleared and self.next_wave_at is None:
-            self.next_wave_at = now + self.t.rest_s
-            events.append({"t": "wave", "n": self.wave, "cleared": True,
-                           "next_in": self.t.rest_s})
+        if self.phase == "journey":
+            cleared = self.wave > 0 and self.remaining == 0
+            if cleared and self.next_wave_at is None:
+                self.next_wave_at = now + self.t.rest_s
+                events.append(self._cleared(self.t.rest_s))
+            overdue = (self.wave > 0 and self.to_spawn == 0
+                       and now - self.wave_started_at >= self.t.wave_max_s)
+            if (self.next_wave_at is not None and now >= self.next_wave_at) or overdue:
+                events.append(self._start_wave(now))
 
-        overdue = (self.wave > 0 and self.to_spawn == 0
-                   and now - self.wave_started_at >= self.t.wave_max_s)
-        if (self.next_wave_at is not None and now >= self.next_wave_at) or overdue:
-            events.append(self._start_wave(now))
+        elif self.phase == "holdout":
+            if self.hold_wave_live and self.remaining == 0:
+                self.hold_wave_live = False
+                self.hold_done += 1
+                if self.hold_done >= self.t.holdout_waves:
+                    events.append(self._cleared(0.0))
+                    events.extend(self._enter_final(now))
+                else:
+                    self.next_wave_at = now + self.t.rest_s
+                    events.append(self._cleared(self.t.rest_s))
+            elif self.next_wave_at is not None and now >= self.next_wave_at:
+                self.hold_wave_live = True
+                events.append(self._start_wave(now))
+
+        elif self.phase == "final":
+            # The last wave never ends: it is topped up until the squad is out.
+            floor = max(1, int(self.wave_total * self.t.final_pressure + 0.5))
+            if self.remaining < floor:
+                self.to_spawn += floor - self.remaining
         return events
 
-    def _start_wave(self, now: float) -> Event:
+    def arrive(self, now: float) -> list[Event]:
+        """The squad has reached the helicopter. Whatever followed them there
+        is still alive; the first holdout wave comes after a short grace."""
+        if self.phase != "journey":
+            return []
+        self.phase = "holdout"
+        self.hold_done = 0
+        self.hold_wave_live = False
+        self.next_wave_at = now + self.t.hold_grace_s
+        return [self._phase_event()]
+
+    def extract(self, dt: float, holders: list[str], need: int) -> list[Event]:
+        """Advance the extraction while enough players are holding. Returns an
+        `extract` event when who is holding changes, and flips the phase to
+        `extracted` when the bar is full."""
+        if self.phase != "final":
+            return []
+        events: list[Event] = []
+        changed = holders != self.extract_holders or need != self.extract_need
+        self.extract_holders, self.extract_need = list(holders), need
+        if len(holders) >= need:
+            self.extract_progress += dt / max(self.t.extract_s, 0.01)
+            if self.extract_progress > 1.0 - 1e-9:        # float dust must not cost a tick
+                self.extract_progress = 1.0
+        if changed:
+            events.append(self.extract_state())
+        if self.extract_progress >= 1.0:
+            self.phase = "extracted"
+        return events
+
+    def extract_state(self) -> Event:
+        return {"t": "extract", "progress": round(self.extract_progress, 3),
+                "holders": list(self.extract_holders), "need": self.extract_need}
+
+    # ---- internals ---------------------------------------------------------------
+    def _enter_final(self, now: float) -> list[Event]:
+        self.phase = "final"
+        self.extract_progress = 0.0
+        self.extract_holders = []
+        wave = self._start_wave(now, self.t.final_factor)
+        return [self._phase_event(), wave]
+
+    def _start_wave(self, now: float, factor: float = 1.0) -> Event:
         self.wave += 1
-        self.wave_total = self.wave_size(self.wave)
+        self.wave_total = max(1, int(self.wave_size(self.wave) * factor + 0.5))
         self.to_spawn = self.wave_total
         self.wave_started_at = now
         self.next_spawn_at = now
         self.next_wave_at = None
-        return {"t": "wave", "n": self.wave, "count": self.wave_total, "cleared": False}
+        return {"t": "wave", "n": self.wave, "count": self.wave_total, "cleared": False,
+                **self._where()}
+
+    def _cleared(self, next_in: float) -> Event:
+        return {"t": "wave", "n": self.wave, "cleared": True, "next_in": next_in, **self._where()}
+
+    def _where(self) -> dict[str, Any]:
+        """Phase, plus holdout progress `[survived, needed]` while holding."""
+        d: dict[str, Any] = {"phase": self.phase}
+        if self.phase == "holdout":
+            d["hold"] = [self.hold_done, self.t.holdout_waves]
+        return d
+
+    def _phase_event(self) -> Event:
+        return {"t": "phase", **self._where()}
 
     def state(self) -> dict[str, Any]:
-        return {"phase": self.phase, "wave": self.wave, "left": self.remaining,
+        return {**self._where(), "wave": self.wave, "left": self.remaining,
                 "total": self.wave_total}

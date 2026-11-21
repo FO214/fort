@@ -38,11 +38,22 @@ export interface PlayerSnap {
   rl: number;
   k: number;
   on: boolean;
+  /** Bleed-out bar while knocked: 1 full, 0 dead. */
+  bl: number;
+  /** While knocked: how far a teammate's revive has got (0–1) and who it is. */
+  rv: number;
+  rb: string | null;
+  /** Holding to extract. */
+  ex: boolean;
 }
 
-export interface MissionState { phase: MissionPhase; wave: number; left: number; total: number }
+export interface MissionState {
+  phase: MissionPhase; wave: number; left: number; total: number;
+  /** Holdout waves `[survived, needed]`. */
+  hold?: [number, number];
+}
 
-export interface Result { id: string; name: string; cls: string; kills: number; damage: number; shots: number; state: PlayerState }
+export interface Result { id: string; name: string; cls: string; kills: number; damage: number; shots: number; state: PlayerState; knocks: number; revives: number }
 
 export interface EndedMsg {
   t: 'ended'; outcome: 'extracted' | 'wiped'; results: Result[]; wave: number; kills: number; duration_s: number;
@@ -52,13 +63,19 @@ export type ServerMsg =
   | { t: 'welcome'; player_id: string; token: string; code: string; host_id: string; classes: Record<string, GunClass>; map: MapInfo }
   | { t: 'lobby'; code: string; host_id: string; phase: RoomPhase; settings: Settings; players: LobbyPlayer[] }
   | { t: 'started'; now: number; map: MapInfo; mission: MissionState }
-  | { t: 'snap'; now: number; ph: MissionPhase; wave: [number, number, number]; z: ZombieRow[]; p: PlayerSnap[] }
+  | { t: 'snap'; now: number; ph: MissionPhase; wave: [number, number, number]; hold: [number, number];
+      /** Extraction `[progress 0–1, holders needed, ids holding]`. */
+      ex: [number, number, string[]]; z: ZombieRow[]; p: PlayerSnap[] }
   | { t: 'fired'; player_id: string; seq: number; reason: string; ammo: number; hits: [number, number][] }
   | { t: 'zhit'; id: number; hp: number; by: string; dmg: number }
   | { t: 'zkill'; id: number; by: string; x: number; y: number }
-  | { t: 'hurt'; player_id: string; hp: number; dmg: number; dir: number; by: number }
+  | { t: 'hurt'; player_id: string; hp: number; dmg: number; dir: number; by: number; bleed?: number }
   | { t: 'knocked'; player_id: string; name: string }
-  | { t: 'wave'; n: number; cleared: boolean; count?: number; next_in?: number }
+  | { t: 'revived'; player_id: string; name: string; by: string; by_name: string; hp: number }
+  | { t: 'dead'; player_id: string; name: string }
+  | { t: 'phase'; phase: MissionPhase; hold?: [number, number] }
+  | { t: 'wave'; n: number; cleared: boolean; phase: MissionPhase; hold?: [number, number]; count?: number; next_in?: number }
+  | { t: 'extract'; progress: number; holders: string[]; need: number }
   | { t: 'reload'; player_id: string; until: number }
   | { t: 'reloaded'; player_id: string; ammo: number }
   | EndedMsg

@@ -16,6 +16,7 @@ import { StepDetector } from './steps';
 const SEND_EVERY_MS = 125;        // 8 Hz to the server
 const FRESH_FIX_S = 15;           // a lobby fix this recent seeds the mission position
 const SHOT_MUTE_S = 0.25;         // recoil is not a footstep
+const QR_FRESH_S = 1.2;           // a code counts as "in view" this long after the camera last read it
 
 /** Seconds on a clock that never jumps. */
 export const clock = (): number =>
@@ -40,6 +41,7 @@ class Tracking {
   lastFix: { lat: number; lon: number; acc: number; t: number } | null = null;
   private stop: Stop | null = null;
   private holders = 0;
+  private qr: { data: string; at: number; held: boolean } | null = null;
 
   /** Start listening (if nobody else has). Returns the matching release. */
   acquire(): Stop {
@@ -58,6 +60,15 @@ class Tracking {
     this.position.setFrame({ origin: map.origin, rotation_deg: map.rotation_deg, start: map.start }, t);
     const f = this.lastFix;
     if (f && t - f.t < FRESH_FIX_S) this.position.onGps(f.lat, f.lon, f.acc, t);
+  }
+
+  /** The camera just read a QR code. */
+  noteQr(data: string): void { this.qr = { data, at: clock(), held: false }; }
+
+  /** Is the code with this text in front of the camera right now? */
+  qrInView(expected: string): boolean {
+    const q = this.qr;
+    return !!q && q.data === expected && (q.held || clock() - q.at < QR_FRESH_S);
   }
 
   /** The gun just fired; do not mistake the jolt for a step. */
@@ -105,6 +116,10 @@ class Tracking {
         return;
       case 'pitch':
         this.orientation.setPitch(e.deg);
+        return;
+      case 'qr':
+        // The simulator holds a code in view until it is taken away.
+        this.qr = e.data == null ? null : { data: e.data, at: t, held: true };
         return;
     }
   }

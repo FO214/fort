@@ -14,7 +14,7 @@ from typing import Any, Optional
 
 from .geo import angle_diff_deg, bearing_xy, dist_xy
 from .mapdata import MapData, Point, load_map
-from .mission import Mission, Tuning
+from .mission import REVIVE_HEALTH, Mission, Tuning
 from .models import CLASSES, DEFAULT_CLASS, Settings
 from .world import Bite, World
 
@@ -57,6 +57,14 @@ class Player:
     kills: int = 0
     damage: int = 0
     shots: int = 0
+    # knocked / revive
+    bleed: float = 1.0                  # bleed-out bar while knocked: 1 full, 0 dead
+    knocks: int = 0                     # times knocked this mission
+    revives: int = 0                    # teammates this player has picked up
+    reviving: Optional[str] = None      # id of the teammate this player is holding Revive on
+    revive_by: Optional[str] = None     # while knocked: who is reviving us
+    revive_progress: float = 0.0        # ...and how far along, 0..1
+    extracting: bool = False            # holding to extract with the helicopter QR in view
 
     @property
     def max_hp(self) -> int:
@@ -75,7 +83,9 @@ class Player:
                 "acc": round(self.acc, 1), "h": round(self.heading, 1),
                 "hp": self.hp, "max": self.max_hp, "st": self.state,
                 "ammo": self.ammo, "rl": self.reloading_until, "k": self.kills,
-                "on": self.connected}
+                "on": self.connected, "bl": round(self.bleed, 3),
+                "rv": round(self.revive_progress, 3), "rb": self.revive_by,
+                "ex": self.extracting}
 
 
 class GameError(Exception):
@@ -156,7 +166,8 @@ class Room:
             p.ammo, p.reloading_until, p.last_fire_ts, p.fire_seq = w.magazine, 0.0, 0.0, -1
             p.x, p.y = game_map.start
             p.acc, p.heading, p.pitch, p.has_fix = 10.0, 0.0, 0.0, False
-            p.kills = p.damage = p.shots = 0
+            p.kills = p.damage = p.shots = p.knocks = p.revives = 0
+            p.bleed, p.reviving, p.revive_by, p.revive_progress, p.extracting = 1.0, None, None, 0.0, False
         return self.started_event(now)
 
     def started_event(self, now: float) -> Event:
@@ -198,6 +209,8 @@ class Room:
         p.fire_seq = seq
         w = CLASSES[p.cls]
 
+        if p.extracting:
+            return [self._fired(p, seq, "extracting")]   # both hands are busy
         if p.reloading_until > now:
             return [self._fired(p, seq, "reloading")]
         if p.ammo <= 0:
@@ -255,6 +268,44 @@ class Room:
         self._start_reload(p, now)
         return [{"t": "reload", "player_id": p.id, "until": p.reloading_until}]
 
+    def revive(self, pid: str, target_id: str, on: bool, now: float) -> list[Event]:
+        """A player presses or releases Revive for a knocked teammate. The
+        hold itself is timed in `tick`."""
+        if self.phase != "playing":
+            return []
+        p = self._p(pid)
+        if not on:
+            self._stop_reviving(p)
+            return []
+        tgt = self.players.get(target_id)
+        if p.state != "alive" or tgt is None or tgt.id == p.id or tgt.state != "knocked":
+            return []
+        if tgt.revive_by not in (None, p.id):
+            return []                      # someone else already has them
+        if p.reviving == tgt.id:
+            return []                      # already holding: a repeated message changes nothing
+        if not self._in_revive_range(p, tgt):
+            raise GameError("Too far away to revive")
+        self._stop_reviving(p)
+        p.reviving, tgt.revive_by, tgt.revive_progress = tgt.id, p.id, 0.0
+        return []
+
+    def set_extract(self, pid: str, on: bool) -> None:
+        """A player starts or stops holding to extract. Only means anything
+        during the final wave, and only for someone still standing."""
+        p = self._p(pid)
+        ok = (self.phase == "playing" and self.mission is not None
+              and self.mission.phase == "final" and p.state == "alive")
+        p.extracting = bool(on) and ok
+
+    def arrived(self, pid: str, now: float) -> list[Event]:
+        """Host's "we're here" button, for when GPS will not admit it."""
+        if pid != self.host_id:
+            raise GameError("Only the host can do that")
+        if self.phase != "playing" or self.mission is None:
+            return []
+        return self.mission.arrive(now)
+
     def tick(self, now: float) -> list[Event]:
         """Advance the mission. Call at 20 Hz."""
         if self.phase != "playing" or self.mission is None:
@@ -270,17 +321,29 @@ class Room:
                 events.append({"t": "reloaded", "player_id": p.id, "ammo": p.ammo})
 
         squad = [p for p in self.players.values() if p.present(now)]
-        targets = self._zombie_targets(squad)
-        for bite in self.world.step(dt, now, targets, self.tuning.zombie_speed):
+        for bite in self.world.step(dt, now, self._zombie_targets(squad), self.tuning.zombie_speed):
             events.extend(self._bite(bite, now))
+        events.extend(self._advance_revives(dt, now))
 
         standing = [p for p in squad if p.state == "alive"]
         if squad and not standing:
             events.extend(self._finish("wiped", now))
             return events
 
+        m = self.mission
+        if m.phase == "journey" and any(self._at_helicopter(p) for p in standing):
+            events.extend(m.arrive(now))
+
         keep_clear: list[Point] = [(p.x, p.y) for p in squad if p.state != "dead"]
-        events.extend(self.mission.tick(now, keep_clear, lambda: self._spawn_anchor(standing)))
+        events.extend(m.tick(now, keep_clear, lambda: self._spawn_anchor(standing)))
+
+        if m.phase == "final":
+            holders = [p.id for p in standing if p.extracting]
+            # Two must hold together. A solo player, or the last one not dead, may do it alone.
+            need = max(1, min(2, sum(1 for p in squad if p.state != "dead")))
+            events.extend(m.extract(dt, holders, need))
+            if m.phase == "extracted":
+                events.extend(self._finish("extracted", now))
         return events
 
     def snapshot(self, now: float) -> dict[str, Any]:
@@ -289,6 +352,8 @@ class Room:
             "t": "snap", "now": now,
             "ph": m.phase if m else self.phase,
             "wave": [m.wave, m.remaining, m.wave_total] if m else [0, 0, 0],
+            "hold": [m.hold_done, m.t.holdout_waves] if m else [0, 0],
+            "ex": [round(m.extract_progress, 3), m.extract_need, m.extract_holders] if m else [0, 1, []],
             "z": self.world.snapshot(),
             "p": [p.wire() for p in self.players.values()],
         }
@@ -316,7 +381,55 @@ class Room:
                 "ammo": p.ammo, "hits": hits or []}
 
     def _zombie_targets(self, squad: list[Player]) -> list[Player]:
-        return [p for p in squad if p.state == "alive"]
+        """Zombies go for the nearest player who is not dead, knocked or not."""
+        return [p for p in squad if p.state != "dead"]
+
+    # ---- helicopter ------------------------------------------------------
+    def _at_helicopter(self, p: Player) -> bool:
+        """Close enough to count as arrived. The radius grows with how unsure
+        the phone is of its position, within reason."""
+        if not p.has_fix:
+            return False
+        h = self.map.helicopter
+        slack = min(p.acc * 0.5, self.tuning.arrive_slack_cap_m)
+        return dist_xy(p.x, p.y, h.x, h.y) <= h.radius_m + slack
+
+    # ---- knocked and revive ------------------------------------------------
+    def _in_revive_range(self, p: Player, tgt: Player) -> bool:
+        # Two phones' GPS errors add up, so standing next to a teammate can
+        # look like metres apart. Be generous by what both phones admit to.
+        slack = min(p.acc + tgt.acc, self.tuning.revive_slack_cap_m)
+        return dist_xy(p.x, p.y, tgt.x, tgt.y) <= self.tuning.revive_range_m + slack
+
+    def _stop_reviving(self, p: Player) -> None:
+        tgt = self.players.get(p.reviving) if p.reviving else None
+        if tgt is not None and tgt.revive_by == p.id:
+            tgt.revive_by, tgt.revive_progress = None, 0.0
+        p.reviving = None
+
+    def _advance_revives(self, dt: float, now: float) -> list[Event]:
+        events: list[Event] = []
+        for p in list(self.players.values()):
+            if not p.reviving:
+                continue
+            tgt = self.players.get(p.reviving)
+            if (tgt is None or tgt.state != "knocked" or p.state != "alive"
+                    or not p.present(now) or not self._in_revive_range(p, tgt)):
+                self._stop_reviving(p)
+                continue
+            if self.world.within(tgt.x, tgt.y, self.tuning.revive_clear_m):
+                tgt.revive_progress = 0.0          # zombies on top of them: clear the area first
+                continue
+            tgt.revive_progress += dt / max(self.tuning.revive_s, 0.01)
+            if tgt.revive_progress >= 1.0:
+                share = REVIVE_HEALTH[min(tgt.knocks, len(REVIVE_HEALTH)) - 1]
+                tgt.state, tgt.hp = "alive", max(1, math.ceil(tgt.max_hp * share))
+                tgt.bleed = 1.0
+                p.revives += 1
+                self._stop_reviving(p)
+                events.append({"t": "revived", "player_id": tgt.id, "name": tgt.name,
+                               "by": p.id, "by_name": p.name, "hp": tgt.hp})
+        return events
 
     def _spawn_anchor(self, standing: list[Player]) -> Optional[Point]:
         """Each zombie is aimed at a random standing player, so the whole
@@ -329,17 +442,35 @@ class Room:
     def _bite(self, bite: Bite, now: float) -> list[Event]:
         p = self.players.get(bite.target_id)
         z = bite.zombie
-        if p is None or p.state != "alive":
+        if p is None or p.state == "dead":
             return []
-        p.hp = max(0, p.hp - z.type.damage)
         # Where the bite came from relative to where the victim is facing, so
         # the HUD can draw the damage wedge without doing any geometry.
-        direction = angle_diff_deg(bearing_xy(p.x, p.y, z.x, z.y), p.heading)
-        events: list[Event] = [{"t": "hurt", "player_id": p.id, "hp": p.hp,
-                                "dmg": z.type.damage, "dir": round(direction, 1), "by": z.id}]
+        direction = round(angle_diff_deg(bearing_xy(p.x, p.y, z.x, z.y), p.heading), 1)
+
+        if p.state == "knocked":
+            # Already down: each bite drains the bleed-out bar instead.
+            p.bleed = max(0.0, p.bleed - 1.0 / max(self.tuning.bleed_bites, 1))
+            events: list[Event] = [{"t": "hurt", "player_id": p.id, "hp": 0, "dmg": 0,
+                                    "dir": direction, "by": z.id, "bleed": round(p.bleed, 3)}]
+            if p.bleed <= 0.0:
+                p.state = "dead"
+                reviver = self.players.get(p.revive_by) if p.revive_by else None
+                if reviver is not None:
+                    self._stop_reviving(reviver)
+                events.append({"t": "dead", "player_id": p.id, "name": p.name})
+            return events
+
+        p.hp = max(0, p.hp - z.type.damage)
+        self._stop_reviving(p)                 # taking a hit breaks the revive you were doing
+        events = [{"t": "hurt", "player_id": p.id, "hp": p.hp, "dmg": z.type.damage,
+                   "dir": direction, "by": z.id}]
         if p.hp == 0:
             p.state = "knocked"
+            p.knocks += 1
+            p.bleed = 1.0
             p.reloading_until = 0.0
+            p.extracting = False
             events.append({"t": "knocked", "player_id": p.id, "name": p.name})
         return events
 
@@ -349,10 +480,13 @@ class Room:
         self.phase = "ended"
         m = self.mission
         ranked = sorted(self.players.values(), key=lambda p: (-p.kills, -p.damage, p.name))
+        for p in self.players.values():
+            p.reviving, p.revive_by, p.revive_progress, p.extracting = None, None, 0.0, False
         self.ended = {
             "t": "ended", "outcome": outcome,
             "results": [{"id": p.id, "name": p.name, "cls": p.cls, "kills": p.kills,
-                         "damage": p.damage, "shots": p.shots, "state": p.state}
+                         "damage": p.damage, "shots": p.shots, "state": p.state,
+                         "knocks": p.knocks, "revives": p.revives}
                         for p in ranked],
             "wave": m.wave if m else 0,
             "kills": self.world.killed,
