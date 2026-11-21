@@ -1,0 +1,13 @@
+{
+  "id": "arena",
+  "name": "Open arena",
+  "note": "Built-in test map: an open field with no walls. It has no fixed real-world origin, so the host's GPS fix at mission start becomes (0, 0). The helicopter sits 30 m along +y (north).",
+  "origin": null,
+  "rotation_deg": 0,
+  "start": [0, 0],
+  "helicopter": { "x": 0, "y": 30, "radius_m": 6, "qr": "LOONIE:HELI" },
+  "spawn": { "mode": "ring", "min_m": 14, "max_m": 20 },
+  "spawn_points": [],
+  "walls": [],
+  "graph": null
+}

@@ -1,5 +1,5 @@
-"""Wire protocol and game configuration. Every message is a JSON object
-with a `t` (type) field; the rest of the shape is documented per model."""
+"""Wire protocol and loadouts. Every message is a JSON object with a `t`
+(type) field; the rest of the shape is documented per model."""
 from __future__ import annotations
 
 from typing import Literal, Optional
@@ -7,49 +7,40 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 
-# --------------------------------------------------------------------- weapons
+# --------------------------------------------------------------------- classes
 
-class Weapon(BaseModel):
+class GunClass(BaseModel):
     id: str
     name: str
     damage: int
     fire_interval_s: float
     magazine: int
     reload_s: float
-    cone_deg: float          # half-angle off boresight
+    spread_deg: float        # aim forgiveness added to the zombie's angular size
     range_m: float
     automatic: bool
-    acquire_ms: int          # how long the reticle must sit on a target to lock
+    hp: int                  # the player's health with this loadout
 
 
-WEAPONS: dict[str, Weapon] = {
-    "light": Weapon(id="light", name="Light", damage=1, fire_interval_s=0.12, magazine=18,
-                    reload_s=2.5, cone_deg=14, range_m=45, automatic=True, acquire_ms=250),
-    "regular": Weapon(id="regular", name="Regular", damage=2, fire_interval_s=0.45, magazine=10,
-                      reload_s=2.8, cone_deg=11, range_m=70, automatic=False, acquire_ms=400),
-    "heavy": Weapon(id="heavy", name="Heavy", damage=3, fire_interval_s=1.0, magazine=5,
-                    reload_s=4.0, cone_deg=8, range_m=110, automatic=False, acquire_ms=650),
+CLASSES: dict[str, GunClass] = {
+    "light": GunClass(id="light", name="Light", damage=1, fire_interval_s=0.12, magazine=24,
+                      reload_s=2.2, spread_deg=3.0, range_m=25, automatic=True, hp=6),
+    "regular": GunClass(id="regular", name="Regular", damage=2, fire_interval_s=0.4, magazine=10,
+                        reload_s=2.6, spread_deg=2.0, range_m=35, automatic=False, hp=8),
+    "heavy": GunClass(id="heavy", name="Heavy", damage=4, fire_interval_s=0.9, magazine=5,
+                      reload_s=3.4, spread_deg=1.0, range_m=50, automatic=False, hp=10),
 }
-
-WEAPON_HP: dict[str, int] = {"light": 6, "regular": 8, "heavy": 10}
+DEFAULT_CLASS = "regular"
 
 
 # --------------------------------------------------------------------- settings
 
-Mode = Literal["ffa", "teams"]
-Aim = Literal["gps", "manual"]     # gps: bearing lock outdoors · manual: tap a target (indoors)
-
-
 class Settings(BaseModel):
-    mode: Mode = "ffa"
-    aim: Aim = "gps"
-    duration_s: int = Field(300, ge=60, le=1800)
-    respawn_s: int = Field(6, ge=0, le=60)
-    spawn_protect_s: float = Field(1.5, ge=0, le=10)
-    max_players: int = Field(8, ge=2, le=32)
+    max_players: int = Field(4, ge=1, le=4)
+    map: str = Field("arena", pattern=r"^[a-z0-9_-]{1,32}$")
 
 
-# ----------------------------------------------------------- client -> server
+# ----------------------------------------------------------- phone -> server
 
 class Create(BaseModel):
     t: Literal["create"]
@@ -75,40 +66,36 @@ class Ready(BaseModel):
     ready: bool
 
 
-class SetTeam(BaseModel):
-    t: Literal["set_team"]
-    team: Literal["alpha", "bravo"]
-
-
-class SetWeapon(BaseModel):
-    t: Literal["set_weapon"]
-    weapon: str
-
-
-class UpdateSettings(BaseModel):
-    t: Literal["settings"]
-    settings: Settings
+class SetClass(BaseModel):
+    t: Literal["set_class"]
+    cls: str
 
 
 class Start(BaseModel):
+    """Host starts the mission. On a map with no fixed real-world origin (the
+    open arena) the host's current GPS fix becomes the origin for everyone."""
     t: Literal["start"]
+    lat: Optional[float] = Field(None, ge=-90, le=90)
+    lon: Optional[float] = Field(None, ge=-180, le=180)
 
 
 class Pos(BaseModel):
+    """Where this phone thinks it is, in map metres, ~8 Hz."""
     t: Literal["pos"]
-    lat: float
-    lon: float
-    acc: float = 10.0            # horizontal accuracy, metres (1σ-ish)
-    heading: Optional[float] = None
-    heading_acc: Optional[float] = None
-    ts: float                    # client wall clock, unix seconds
+    x: float = Field(ge=-5000, le=5000)
+    y: float = Field(ge=-5000, le=5000)
+    acc: float = Field(10.0, ge=0, le=500)       # horizontal accuracy, metres
+    heading: float = 0.0                         # map heading the camera faces
+    pitch: float = Field(0.0, ge=-90, le=90)     # camera elevation, degrees
 
 
 class Fire(BaseModel):
+    """One trigger pull. `hits` are the zombies the phone saw under its
+    crosshair, nearest first; `heading` is where the gun pointed."""
     t: Literal["fire"]
     seq: int
-    target_id: Optional[str] = None
-    ts: float                    # client wall clock at trigger pull
+    hits: list[int] = Field(default_factory=list, max_length=8)
+    heading: float = 0.0
 
 
 class Reload(BaseModel):
@@ -119,12 +106,8 @@ class Leave(BaseModel):
     t: Literal["leave"]
 
 
-class End(BaseModel):
-    t: Literal["end"]
-
-
 class Reset(BaseModel):
-    """Host sends after a match to put the room back in the lobby."""
+    """Host only. After a mission: back to the lobby. During one: abort it."""
     t: Literal["reset"]
 
 

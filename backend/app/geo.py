@@ -1,5 +1,14 @@
-"""Geodesy helpers. Everything is in degrees and metres; headings are
-compass bearings (0 = north, clockwise)."""
+"""Geometry helpers.
+
+Two coordinate systems are in play:
+
+* Real world: degrees of latitude/longitude, compass bearings (0 = north,
+  clockwise).
+* The map: a flat plane in metres, x to the right and y up. A map's
+  `rotation_deg` is the compass bearing its +y axis points along, so with
+  rotation 0 the map is x east / y north. Headings on the map use the same
+  clockwise-from-+y convention as a compass.
+"""
 from __future__ import annotations
 
 import math
@@ -31,21 +40,39 @@ def angle_diff_deg(a: float, b: float) -> float:
     return 180.0 if d == -180.0 else d
 
 
-def dynamic_gate_deg(cone_deg: float, acc_shooter_m: float, acc_target_m: float,
-                     dist_m: float, cap_deg: float = 40.0) -> float:
-    """How far off boresight a shot may be and still count.
-
-    The weapon's cone is the design intent; the second term is the angular
-    size of the combined GPS uncertainty at this range, so a shot that is
-    physically indistinguishable from on-target is not thrown away. Capped so
-    a bad fix can't turn a rifle into a flamethrower.
-    """
-    slop = math.degrees(math.atan2(max(acc_shooter_m, 0) + max(acc_target_m, 0), max(dist_m, 1.0)))
-    return min(cone_deg + slop, max(cap_deg, cone_deg))
-
-
 def offset_m(lat: float, lon: float, north_m: float, east_m: float) -> tuple[float, float]:
     """Move a point by metres north/east. Good enough at play scale."""
     dlat = north_m / EARTH_RADIUS_M
     dlon = east_m / (EARTH_RADIUS_M * math.cos(math.radians(lat)))
     return lat + math.degrees(dlat), lon + math.degrees(dlon)
+
+
+# ------------------------------------------------------------------ map plane
+
+def bearing_xy(x1: float, y1: float, x2: float, y2: float) -> float:
+    """Map heading from point 1 to point 2, in [0, 360). 0 = +y, clockwise."""
+    return (math.degrees(math.atan2(x2 - x1, y2 - y1)) + 360.0) % 360.0
+
+
+def dist_xy(x1: float, y1: float, x2: float, y2: float) -> float:
+    return math.hypot(x2 - x1, y2 - y1)
+
+
+def to_local(lat: float, lon: float, origin_lat: float, origin_lon: float,
+             rotation_deg: float = 0.0) -> tuple[float, float]:
+    """Latitude/longitude to map metres. Flat-earth around the origin, which
+    is exact to millimetres over one building."""
+    north = math.radians(lat - origin_lat) * EARTH_RADIUS_M
+    east = math.radians(lon - origin_lon) * EARTH_RADIUS_M * math.cos(math.radians(origin_lat))
+    r = math.radians(rotation_deg)
+    return (east * math.cos(r) - north * math.sin(r),
+            east * math.sin(r) + north * math.cos(r))
+
+
+def from_local(x: float, y: float, origin_lat: float, origin_lon: float,
+               rotation_deg: float = 0.0) -> tuple[float, float]:
+    """Inverse of `to_local`."""
+    r = math.radians(rotation_deg)
+    east = x * math.cos(r) + y * math.sin(r)
+    north = -x * math.sin(r) + y * math.cos(r)
+    return offset_m(origin_lat, origin_lon, north, east)

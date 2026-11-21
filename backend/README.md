@@ -1,55 +1,82 @@
-# loonie backend
+# LOONIE backend
 
-Authoritative match server: FastAPI + WebSockets, in-memory rooms, 10 Hz tick.
-One small box runs hundreds of players; four roommates won't register.
+The server owns the game world. It spawns zombies, walks them toward players,
+decides when they bite and whether a shot counts, and sends every phone the
+same snapshots. FastAPI + WebSockets, rooms in memory.
 
 ## Run locally
 
+Needs Python 3.10 or newer.
+
 ```sh
-pip install -r requirements-dev.txt
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-pytest            # 16 tests: geodesy, engine with fake clock, 4-client WS match
+python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+.venv/bin/python -m pytest
 ```
 
 Phones on the same Wi-Fi reach it at `ws://<your-laptop-ip>:8000/ws`.
 
-## Protocol (all JSON, `t` is the type)
+## Layout
 
-First message on a socket: `create {name, settings}` · `join {code, name}` ·
-`resume {code, player_id, token}`. Server answers `welcome` then streams
-`lobby` on every roster change and, once playing, a `snapshot` every 100 ms.
+```
+app/main.py      sockets, room codes, token resume, the 20 Hz tick loop
+app/room.py      lobby, players, ammo/reload, shot validation, bites
+app/world.py     zombies: spawn, chase, attack, un-stack
+app/mission.py   wave pacing and every tuning number (class Tuning)
+app/mapdata.py   map files, spawn placement, lat/lon <-> map metres
+app/models.py    wire protocol and gun classes
+app/geo.py       geometry helpers
+maps/arena.json  built-in open test map
+```
 
-| client → server | server → client |
+## How it works
+
+- **Map.** A flat plane in metres, x right and y up. `rotation_deg` is the
+  compass bearing of +y, so with 0 the map is x east / y north. The arena has
+  no fixed real-world origin: the host's GPS fix at `start` becomes (0, 0).
+- **Tick.** The world steps every 50 ms. Every second tick each phone gets a
+  `snap`: mission phase, wave, zombies as `[id, type, x, y, hp, state, target]`
+  and one small object per player.
+- **Position.** Each phone reports its own `pos {x, y, acc, heading, pitch}` in
+  map metres. The server trusts it; this is co-op.
+- **Shooting.** The phone decides which zombie is under its crosshair and
+  sends `fire {seq, hits, heading}`. The server checks ammo, fire rate and
+  reload, then that the claimed zombie exists, is in range, and lies within a
+  small angle of where the gun points. One bullet hits one zombie.
+- **Zombies** chase the nearest standing player and bite within 1.5 m after a
+  short wind-up. Health 0 means knocked; everyone down ends the mission.
+
+## Protocol (JSON, `t` is the type)
+
+First message on a socket: `create {name}`, `join {code, name}` or
+`resume {code, player_id, token}`. The server answers `welcome` (with the gun
+classes and the map), then `lobby` on every roster change.
+
+| phone → server | server → phone |
 |---|---|
-| `ready` `set_team` `set_weapon` `settings` `start` | `lobby` `started` `snapshot` |
-| `pos {lat, lon, acc, heading, heading_acc, ts}` @ 4 Hz | `fired {player_id, seq, reason, off?, gate?, dist?}` |
-| `fire {seq, target_id, ts}` | `hit {shooter_id, target_id, damage, hp, dir}` |
-| `reload` `end` `leave` `ping` | `killed` `respawned` `reload` `reloaded` `ended` `error` |
+| `ready` `set_class` `start {lat?, lon?}` | `welcome` `lobby` `started` |
+| `pos {x, y, acc, heading, pitch}` ~8 Hz | `snap` 10 Hz |
+| `fire {seq, hits, heading}` `reload` | `fired` `zhit` `zkill` `reload` `reloaded` |
+| `reset` (host) `leave` `ping` | `hurt {dir}` `knocked` `wave` `ended` `error` |
 
-## How a shot is judged (`engine.py`)
+## Tuning
 
-1. Lag-compensate: rewind both players to the shooter's trigger timestamp
-   (bounded to 1 s).
-2. Distance ≤ weapon range.
-3. Angle off the shooter's heading ≤ **dynamic gate** = weapon cone +
-   `atan((acc_shooter + acc_target) / dist)`. GPS uncertainty widens the gate
-   at close range and tightens it at distance, so a physically on-target shot
-   isn't thrown away for a 3 m fix. Capped at 40°.
-4. Cooldown, magazine, reload, spawn protection, friendly fire.
+Every pacing and balance number lives in `Tuning` (`app/mission.py`). Override
+any of them for one server with a JSON object in the environment:
 
-Misses still broadcast `fired` (with the reason) so every client can play the
-shot and the shooter's HUD can explain why it didn't land.
+```sh
+LOONIE_TUNING='{"grace_s": 2, "zombie_speed": 1.5}' .venv/bin/uvicorn app.main:app
+```
 
 ## Deploy on AWS free tier
 
-EC2 **t3.micro** (750 h/month free for 12 months) is the cheapest thing that
-runs a persistent WebSocket. Lambda + API Gateway WebSockets works but is
-more moving parts than this needs.
+EC2 **t3.micro** is the cheapest thing that runs a persistent WebSocket.
 
 1. Launch Amazon Linux 2023, t3.micro, security group inbound **80, 443**.
 2. Paste `deploy/ec2-user-data.sh` into *User data*. It installs Docker,
-   clones this repo, and brings up the server behind Caddy with a real TLS
-   cert on `<ip-with-dashes>.sslip.io` — no domain purchase.
+   clones the repo, and brings up the server behind Caddy with a real TLS
+   cert on `<ip-with-dashes>.sslip.io`.
 3. Point the app at `wss://<ip-with-dashes>.sslip.io/ws`.
 
-To redeploy: `ssh`, `cd /opt/loonie && git pull && cd backend/deploy && docker-compose up -d --build`.
+For play inside one building, a laptop on the same Wi-Fi is simpler and has
+less lag than a cloud box.
