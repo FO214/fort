@@ -1,0 +1,61 @@
+{
+  "expo": {
+    "name": "LOONIE",
+    "slug": "loonie",
+    "version": "0.1.0",
+    "orientation": "default",
+    "icon": "./assets/icon.png",
+    "scheme": "loonie",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#06080D",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#06080D"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "app.loonie.mobile",
+      "infoPlist": {
+        "NSCameraUsageDescription": "LOONIE shows the live camera behind the HUD so you can aim at other players.",
+        "NSLocationWhenInUseUsageDescription": "LOONIE uses your position and heading to work out who you're aiming at.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "app.loonie.mobile",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png",
+        "backgroundColor": "#06080D"
+      },
+      "permissions": [
+        "CAMERA",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "VIBRATE"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "LOONIE shows the live camera behind the HUD so you can aim."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "LOONIE uses your position and heading to work out who you're aiming at."
+        }
+      ]
+    ]
+  }
+}

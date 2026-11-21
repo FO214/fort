@@ -1,0 +1,6 @@
+# Replace with your EC2 public IP. sslip.io resolves <ip>.sslip.io -> <ip>,
+# and Let's Encrypt will issue a cert for it, so the phones get wss:// with
+# no domain to buy.
+{$PUBLIC_HOST}
+
+reverse_proxy loonie:8000
