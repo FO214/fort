@@ -28,7 +28,7 @@ export function Join() {
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <View style={{ flex: 1, paddingHorizontal: space.xl, paddingTop: space.xxl, gap: space.xl }}>
           <View style={{ gap: space.xs }}>
-            <T v="label" c={color.ink3}>Join a game</T>
+            <T v="label" c={color.ink3}>Join a squad</T>
             <T v="title">Enter the code</T>
             <T v="body" c={color.ink2}>It's on the host's lobby screen.</T>
           </View>

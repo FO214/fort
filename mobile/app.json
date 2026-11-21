@@ -18,9 +18,10 @@
       "supportsTablet": false,
       "bundleIdentifier": "app.loonie.mobile",
       "infoPlist": {
-        "NSCameraUsageDescription": "LOONIE shows the live camera behind the HUD so you can aim at other players.",
-        "NSLocationWhenInUseUsageDescription": "LOONIE uses your position and heading to work out who you're aiming at.",
-        "ITSAppUsesNonExemptEncryption": false
+        "NSCameraUsageDescription": "LOONIE shows the live camera behind the HUD so zombies appear in the room with you.",
+        "NSLocationWhenInUseUsageDescription": "LOONIE uses your position and heading to place zombies around you.",
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSMotionUsageDescription": "LOONIE uses motion to follow where the gun points and to count your steps."
       }
     },
     "android": {
@@ -47,15 +48,22 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "LOONIE shows the live camera behind the HUD so you can aim."
+          "cameraPermission": "LOONIE shows the live camera behind the HUD so zombies appear in the room with you."
         }
       ],
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "LOONIE uses your position and heading to work out who you're aiming at."
+          "locationWhenInUsePermission": "LOONIE uses your position and heading to place zombies around you."
         }
-      ]
+      ],
+      [
+        "expo-sensors",
+        {
+          "motionPermission": "LOONIE uses motion to follow where the gun points and to count your steps."
+        }
+      ],
+      "expo-screen-orientation"
     ]
   }
 }

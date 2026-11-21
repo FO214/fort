@@ -1,15 +1,22 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { PlayerPub, Result, SensorFix, ServerMsg, Settings, Weapon } from './net/types';
+import { ZombieBuffer } from './game/zombies';
+import type { EndedMsg, GunClass, LobbyPlayer, MapInfo, MissionState, PlayerSnap, RoomPhase, ServerMsg, Settings } from './net/types';
 
 export type AppPhase = 'menu' | 'join' | 'lobby' | 'playing' | 'summary';
 export type Connection = 'idle' | 'connecting' | 'open' | 'reconnecting' | 'closed';
 
-export interface FeedItem { key: string; at: number; shooter: string; target: string; weapon: string; mine: 'kill' | 'death' | null }
-export interface ShotFeedback { key: number; at: number; kind: 'hit' | 'kill' | 'miss'; reason: string; off?: number; gate?: number; dist?: number }
-export interface Damage { key: number; at: number; dir: number | null; damage: number; hp: number; shooter: string }
+export interface FeedItem { key: string; at: number; text: string; detail?: string; tone: 'good' | 'bad' | 'plain' }
+export interface ShotFeedback { key: number; at: number; kind: 'hit' | 'kill' | 'miss'; reason: string }
+export interface Damage { key: number; at: number; dir: number | null; damage: number; hp: number }
 
 export interface Session { code: string; playerId: string; token: string }
+
+/**
+ * Zombies arrive ten times a second and are drawn every frame, so they live
+ * outside React state: the AR layer reads this buffer directly.
+ */
+export const zombies = new ZombieBuffer();
 
 interface State {
   phase: AppPhase;
@@ -20,56 +27,67 @@ interface State {
 
   session: Session | null;
   hostId: string | null;
-  weapons: Record<string, Weapon>;
+  classes: Record<string, GunClass>;
   settings: Settings | null;
-  players: PlayerPub[];
-  roomPhase: 'lobby' | 'playing' | 'ended';
-  endsAt: number;
+  roster: LobbyPlayer[];
+  roomPhase: RoomPhase;
+  map: MapInfo | null;
   serverOffset: number;        // seconds to add to Date.now()/1000 to get server time
 
-  fix: SensorFix | null;
-  sensorError: string | null;
+  /** Bumped by every `started`, so the tracker knows to re-anchor the map. */
+  missionSeq: number;
+  mission: MissionState;
+  squad: PlayerSnap[];
+  zombieCount: number;
   ammo: number;
   reloadingUntil: number;
   shots: ShotFeedback[];
   damages: Damage[];
   feed: FeedItem[];
-  deadUntil: number | null;
-  results: Result[] | null;
-  teamsResult: { alpha: number; bravo: number } | null;
-  durationS: number;
+  ended: EndedMsg | null;
+
+  gpsAcc: number | null;       // newest reported GPS accuracy, null before the first fix
+  hasCompass: boolean;
+  sensorError: string | null;
 
   setName: (n: string) => void;
   setServerUrl: (u: string) => void;
   setPhase: (p: AppPhase) => void;
   setError: (e: string | null) => void;
   setConnection: (c: Connection) => void;
-  setFix: (f: SensorFix) => void;
+  setGpsAcc: (a: number) => void;
+  setHasCompass: (v: boolean) => void;
   setSensorError: (e: string | null) => void;
   handle: (m: ServerMsg) => void;
   leave: () => void;
   hydrate: () => Promise<void>;
 }
 
-const KEY = 'loonie.prefs.v1';
+const KEY = 'loonie.prefs.v2';
 const DEFAULT_URL = 'ws://localhost:8000/ws';
+const NO_MISSION: MissionState = { phase: 'journey', wave: 0, left: 0, total: 0 };
 
 /**
- * Where to find the match server before the user has set one.
- * A build-time EXPO_PUBLIC_SERVER_URL wins. Otherwise, on the web, use the
- * machine that served the page: phones opening http://<laptop-ip>:8081 then
- * reach ws://<laptop-ip>:8000/ws with no setup. Native has no page origin.
+ * Where to find the game server before the user has set one.
+ * A `?server=` in the page address wins (tests), then a build-time
+ * EXPO_PUBLIC_SERVER_URL. Otherwise, on the web, use the machine that served
+ * the page: phones opening http://<laptop-ip>:8081 then reach
+ * ws://<laptop-ip>:8000/ws with no setup. Native has no page origin.
  */
 function defaultServerUrl(): string {
+  const loc = typeof window !== 'undefined' ? window.location : undefined;
+  const fromQuery = loc?.search ? new URLSearchParams(loc.search).get('server') : null;
+  if (fromQuery) return fromQuery;
   // Written out in full so Expo can inline it at build time.
   const fromBuild = process.env.EXPO_PUBLIC_SERVER_URL;
   if (fromBuild) return fromBuild;
-  const loc = typeof window !== 'undefined' ? window.location : undefined;
   if (loc?.hostname) return `${loc.protocol === 'https:' ? 'wss' : 'ws'}://${loc.hostname}:8000/ws`;
   return DEFAULT_URL;
 }
 
 let feedback = 0;
+const feedItem = (text: string, tone: FeedItem['tone'], detail?: string): FeedItem =>
+  ({ key: `f${++feedback}`, at: Date.now() / 1000, text, detail, tone });
 
 export const useStore = create<State>((set, get) => ({
   phase: 'menu',
@@ -79,120 +97,119 @@ export const useStore = create<State>((set, get) => ({
   error: null,
   session: null,
   hostId: null,
-  weapons: {},
+  classes: {},
   settings: null,
-  players: [],
+  roster: [],
   roomPhase: 'lobby',
-  endsAt: 0,
+  map: null,
   serverOffset: 0,
-  fix: null,
-  sensorError: null,
+  missionSeq: 0,
+  mission: NO_MISSION,
+  squad: [],
+  zombieCount: 0,
   ammo: 0,
   reloadingUntil: 0,
   shots: [],
   damages: [],
   feed: [],
-  deadUntil: null,
-  results: null,
-  teamsResult: null,
-  durationS: 0,
+  ended: null,
+  gpsAcc: null,
+  hasCompass: false,
+  sensorError: null,
 
   setName: (name) => { set({ name }); persist(get); },
   setServerUrl: (serverUrl) => { set({ serverUrl }); persist(get); },
   setPhase: (phase) => set({ phase }),
   setError: (error) => set({ error }),
   setConnection: (connection) => set({ connection }),
-  setFix: (fix) => set({ fix }),
+  setGpsAcc: (gpsAcc) => set({ gpsAcc }),
+  setHasCompass: (hasCompass) => set({ hasCompass }),
   setSensorError: (sensorError) => set({ sensorError }),
 
   handle: (m) => {
     const s = get();
     const now = Date.now() / 1000;
+    const myId = s.session?.playerId;
     switch (m.t) {
       case 'welcome': {
         const session = { code: m.code, playerId: m.player_id, token: m.token };
-        set({ session, hostId: m.host_id, weapons: m.weapons, error: null, connection: 'open' });
+        set({ session, hostId: m.host_id, classes: m.classes, map: m.map, error: null, connection: 'open' });
         persist(get, session);
         return;
       }
       case 'lobby': {
-        const next: Partial<State> = { hostId: m.host_id, settings: m.settings, players: m.players, roomPhase: m.phase };
-        if (m.phase === 'lobby' && s.phase !== 'lobby' && s.phase !== 'menu' && s.phase !== 'join') {
-          // Host reset the room after a match.
-          next.phase = 'lobby'; next.results = null;
+        const next: Partial<State> = { hostId: m.host_id, settings: m.settings, roster: m.players, roomPhase: m.phase };
+        if (m.phase === 'lobby' && (s.phase === 'playing' || s.phase === 'summary')) {
+          // Host sent everyone back to the lobby (play again, or an abort).
+          next.phase = 'lobby'; next.ended = null;
+          zombies.clear();
         }
         if (s.phase === 'menu' || s.phase === 'join') next.phase = m.phase === 'playing' ? 'playing' : m.phase === 'ended' ? 'summary' : 'lobby';
         set(next);
         return;
       }
       case 'started': {
-        const me = s.players.find((p) => p.id === s.session?.playerId);
-        const w = me ? s.weapons[me.weapon] : undefined;
+        const me = s.roster.find((p) => p.id === myId);
+        const cls = me ? s.classes[me.cls] : undefined;
+        const fresh = s.phase !== 'playing';       // a reconnect re-sends `started` mid-mission
+        if (fresh) zombies.clear();
         set({
-          phase: 'playing', roomPhase: 'playing', endsAt: m.ends_at, serverOffset: m.now - now,
-          settings: m.settings, ammo: w?.magazine ?? 0, reloadingUntil: 0, shots: [], damages: [], feed: [],
-          deadUntil: null, results: null,
+          phase: 'playing', roomPhase: 'playing', map: m.map, mission: m.mission, serverOffset: m.now - now,
+          missionSeq: s.missionSeq + 1, ended: null,
+          ...(fresh ? { ammo: cls?.magazine ?? 0, reloadingUntil: 0, shots: [], damages: [], feed: [], squad: [], zombieCount: 0 } : {}),
         });
         return;
       }
-      case 'snapshot': {
-        // Smooth the clock offset so one delayed packet doesn't jerk the timer.
+      case 'snap': {
+        // Smooth the clock offset so one delayed packet doesn't jerk the world.
         const target = m.now - now;
-        const serverOffset = s.serverOffset === 0 ? target : s.serverOffset + (target - s.serverOffset) * 0.2;
-        const me = m.players.find((p) => p.id === s.session?.playerId);
-        const next: Partial<State> = { players: m.players, endsAt: m.ends_at, serverOffset, roomPhase: m.phase };
-        if (me) {
-          next.ammo = me.ammo;
-          next.reloadingUntil = me.reloading_until;
-          next.deadUntil = me.alive ? null : me.respawn_at || -1;
-        }
-        if (m.phase === 'playing' && s.phase !== 'playing') next.phase = 'playing';
+        const serverOffset = s.serverOffset === 0 ? target : s.serverOffset + (target - s.serverOffset) * 0.1;
+        zombies.push(m.now, m.z);
+        const me = m.p.find((p) => p.id === myId);
+        const next: Partial<State> = {
+          squad: m.p, serverOffset, zombieCount: m.z.length,
+          mission: { phase: m.ph, wave: m.wave[0], left: m.wave[1], total: m.wave[2] },
+        };
+        if (me) { next.ammo = me.ammo; next.reloadingUntil = me.rl; }
+        if (s.phase !== 'playing' && s.roomPhase === 'playing') next.phase = 'playing';
         set(next);
         return;
       }
       case 'fired': {
-        if (m.player_id !== s.session?.playerId) return;
-        const kind = m.reason === 'hit' ? 'hit' : 'miss';
-        const shot: ShotFeedback = { key: ++feedback, at: now, kind, reason: m.reason, off: m.off, gate: m.gate, dist: m.dist };
+        if (m.player_id !== myId) return;
+        const killed = m.hits.some(([, hp]) => hp <= 0);
+        const kind = killed ? 'kill' : m.reason === 'hit' ? 'hit' : 'miss';
+        const shot: ShotFeedback = { key: ++feedback, at: now, kind, reason: m.reason };
         set({ ammo: m.ammo, shots: [...s.shots.slice(-5), shot] });
         return;
       }
-      case 'hit': {
-        if (m.target_id === s.session?.playerId) {
-          const shooter = s.players.find((p) => p.id === m.shooter_id)?.name ?? '???';
-          const d: Damage = { key: ++feedback, at: now, dir: m.dir, damage: m.damage, hp: m.hp, shooter };
-          set({ damages: [...s.damages.slice(-5), d] });
-        }
+      case 'zhit':
+        zombies.onHit(m.id, now + s.serverOffset);
+        return;
+      case 'zkill':
+        zombies.onKill(m.id, m.x, m.y, now + s.serverOffset);
+        return;
+      case 'hurt': {
+        if (m.player_id !== myId) return;
+        const d: Damage = { key: ++feedback, at: now, dir: m.dir, damage: m.dmg, hp: m.hp };
+        set({ damages: [...s.damages.slice(-5), d] });
         return;
       }
-      case 'killed': {
-        const mine = m.shooter_id === s.session?.playerId ? 'kill' : m.target_id === s.session?.playerId ? 'death' : null;
-        const item: FeedItem = { key: `${m.at}-${m.target_id}`, at: now, shooter: m.shooter, target: m.target, weapon: m.weapon, mine };
-        const next: Partial<State> = { feed: [...s.feed.slice(-5), item] };
-        if (mine === 'kill') {
-          const last = s.shots[s.shots.length - 1];
-          next.shots = [...s.shots.slice(0, -1), { ...(last ?? { key: ++feedback, at: now, reason: 'hit' }), kind: 'kill' as const }];
-        }
-        if (mine === 'death') next.deadUntil = m.respawn_at || -1;
-        set(next);
+      case 'knocked':
+        set({ feed: [...s.feed.slice(-5), feedItem(m.player_id === myId ? 'You' : m.name, 'bad', 'knocked')] });
         return;
-      }
-      case 'respawned': {
-        if (m.player_id === s.session?.playerId) {
-          const me = s.players.find((p) => p.id === m.player_id);
-          const w = me ? s.weapons[me.weapon] : undefined;
-          set({ deadUntil: null, ammo: w?.magazine ?? s.ammo, reloadingUntil: 0 });
-        }
+      case 'wave':
+        set({ feed: [...s.feed.slice(-5), m.cleared ? feedItem(`Wave ${m.n}`, 'good', 'cleared') : feedItem(`Wave ${m.n}`, 'plain', `${m.count ?? ''} incoming`)] });
         return;
-      }
       case 'reload':
-        if (m.player_id === s.session?.playerId) set({ reloadingUntil: m.until });
+        if (m.player_id === myId) set({ reloadingUntil: m.until });
         return;
       case 'reloaded':
-        if (m.player_id === s.session?.playerId) set({ ammo: m.ammo, reloadingUntil: 0 });
+        if (m.player_id === myId) set({ ammo: m.ammo, reloadingUntil: 0 });
         return;
       case 'ended':
-        set({ phase: 'summary', roomPhase: 'ended', results: m.results, teamsResult: m.teams, durationS: m.duration_s });
+        zombies.clear();
+        set({ phase: 'summary', roomPhase: 'ended', ended: m });
         return;
       case 'error':
         set({ error: m.msg });
@@ -203,9 +220,11 @@ export const useStore = create<State>((set, get) => ({
   },
 
   leave: () => {
+    zombies.clear();
     set({
-      phase: 'menu', session: null, hostId: null, players: [], settings: null, roomPhase: 'lobby',
-      results: null, feed: [], shots: [], damages: [], deadUntil: null, error: null, connection: 'idle',
+      phase: 'menu', session: null, hostId: null, roster: [], settings: null, roomPhase: 'lobby',
+      ended: null, feed: [], shots: [], damages: [], squad: [], mission: NO_MISSION, zombieCount: 0,
+      error: null, connection: 'idle',
     });
     persist(get, null);
   },
@@ -215,7 +234,8 @@ export const useStore = create<State>((set, get) => ({
       const raw = await AsyncStorage.getItem(KEY);
       if (!raw) return;
       const p = JSON.parse(raw) as { name?: string; serverUrl?: string; session?: Session | null };
-      set({ name: p.name ?? '', serverUrl: p.serverUrl ?? get().serverUrl });
+      const pinned = typeof window !== 'undefined' && !!window.location?.search && new URLSearchParams(window.location.search).has('server');
+      set({ name: p.name ?? '', serverUrl: pinned ? get().serverUrl : p.serverUrl ?? get().serverUrl });
       if (p.session) set({ session: p.session });
     } catch { /* first run */ }
   },
@@ -227,9 +247,14 @@ async function persist(get: () => State, session?: Session | null) {
   try { await AsyncStorage.setItem(KEY, JSON.stringify(payload)); } catch { /* storage unavailable */ }
 }
 
-export const selectMe = (s: State) => s.players.find((p) => p.id === s.session?.playerId);
-export const selectWeapon = (s: State) => { const me = selectMe(s); return me ? s.weapons[me.weapon] : undefined; };
+export const selectMe = (s: State) => s.squad.find((p) => p.id === s.session?.playerId);
+export const selectMyLobby = (s: State) => s.roster.find((p) => p.id === s.session?.playerId);
+export const selectClass = (s: State) => { const me = selectMyLobby(s); return me ? s.classes[me.cls] : undefined; };
 export const serverNow = () => Date.now() / 1000 + useStore.getState().serverOffset;
 
 // Debug/e2e hook: lets a test read client state on the web build.
-if (typeof window !== 'undefined') (window as unknown as { __loonieStore?: unknown }).__loonieStore = useStore;
+if (typeof window !== 'undefined') {
+  const w = window as unknown as { __loonieStore?: unknown; __loonieZombies?: unknown };
+  w.__loonieStore = useStore;
+  w.__loonieZombies = zombies;
+}

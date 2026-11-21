@@ -1,25 +1,15 @@
 # LOONIE mobile
 
-Expo / React Native client. One codebase for iOS, Android and web.
+Expo / React Native client. The phone sits on a Nerf gun in landscape; the
+camera shows the room, zombies are drawn over it, and the crosshair in the
+middle of the screen is the gun sight.
 
-## Fastest: phone browsers, nothing to install
+## Run it on phones (Expo Go)
 
-```sh
-# laptop, terminal 1
-cd backend && pip install -r requirements.txt && uvicorn app.main:app --host 0.0.0.0 --port 8000
-# laptop, terminal 2
-cd mobile && npm install && npx expo start --web
-```
-Everyone on the same Wi-Fi opens `http://<laptop-ip>:8081` in their phone's
-browser. The app points itself at the server on that same laptop, so
-there's nothing to configure. Host picks **Aim · Tap (indoors)**.
-
-## Run it with your roommates tonight (Expo Go)
-
-1. **Server.** On one laptop, from `../backend`:
+1. **Server.** On a laptop, from `../backend`:
    ```sh
-   pip install -r requirements.txt
-   uvicorn app.main:app --host 0.0.0.0 --port 8000
+   python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+   .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
    ```
    Note the laptop's LAN IP (`ipconfig getifaddr en0` on macOS).
 2. **App.** From this folder:
@@ -30,33 +20,31 @@ there's nothing to configure. Host picks **Aim · Tap (indoors)**.
    Scan the QR with Expo Go on each phone (same Wi-Fi).
 3. On the menu, tap **Server** and set it to `ws://<laptop-ip>:8000/ws`.
    It's remembered.
-4. One phone **creates**; the others **join** with the four-letter code.
-   Pick a loadout, tap ready, host starts.
+4. One phone **creates** a squad; the others **join** with the four-letter
+   code. Pick a loadout, tap ready, host starts.
 
-**Indoors?** In the lobby the host sets **Aim · Tap (indoors)**. GPS is
-useless inside, so instead of a bearing lock you tap the enemy's chip in
-the HUD to lock, then fire. Everything else — ammo, damage, kills,
-respawn, teams — is the same. **Outdoors**, leave it on **Aim · GPS** and
-hold the phone sideways like you're filming the target.
+Camera and motion sensors need Expo Go (or https). A phone browser on plain
+http will not get them.
 
-## How aiming works
+## How the phone knows where things are
 
-`src/game/aim.ts` mirrors `backend/app/engine.py`:
+- **Position** (`src/game/position.ts`). GPS is the source of truth. Between
+  fixes, each detected step moves the estimate 0.7 m along the heading. Every
+  fix pulls the estimate toward itself, weighted by its reported accuracy and
+  never faster than 3 m/s. While you stand still GPS is trusted less, so
+  indoor noise does not slide the zombies around.
+- **Heading and pitch** (`src/game/orientation.ts`). Turning comes from the
+  motion sensor (smooth); the compass slowly corrects its drift. Pitch comes
+  from the same sensor.
+- **Zombies** (`src/game/zombies.ts`). The server sends positions 10 times a
+  second; the phone draws the world 100 ms in the past, sliding between
+  snapshots. The same numbers place a zombie on screen and decide whether
+  the crosshair is on it.
+- **Shooting.** Fire sends the zombies under the crosshair (nearest first)
+  and where the gun pointed. The server has the last word.
 
-- Every enemy gets a bearing and distance from your fix.
-- A target is *lockable* when it's inside the weapon's range and inside the
-  **dynamic gate** — the weapon's cone widened by the angular size of both
-  players' GPS uncertainty at that range.
-- Hold the most-centred lockable target for the weapon's `acquire_ms` and
-  the reticle closes to mint: **locked**. Fire now and the shot carries
-  that target id.
-- Fire without a lock and the shot still costs ammo; the HUD says *No lock*.
-
-The server re-judges every shot at the moment you pulled the trigger
-(lag-compensated) and is the only thing that changes anyone's health.
-
-`src/sensors/index.ts` is the seam for a better bearing source later
-(ARCore Geospatial heading, camera-confirmed targets).
+`src/game/tracking.ts` ties the sensors to those modules and reports the
+phone's pose to the server 8 times a second.
 
 ## Layout
 
@@ -64,26 +52,45 @@ The server re-judges every shot at the moment you pulled the trigger
 App.tsx               phase router: menu · join · lobby · playing · summary
 src/theme.ts          colour / spacing / type tokens (dark glass over camera)
 src/store.ts          zustand store; handles every server message
-src/net/client.ts     WebSocket with token resume + backoff
-src/sensors/          native (expo-location) · web · sim (tests)
-src/game/aim.ts       candidates, dynamic gate, lock state machine
-src/ui/               Glass, GlassButton, Reticle, FireButton, Radar, EnemyTag,
-                      HealthBar, KillFeed, DamageFlash, HitMarker, …
+src/net/              WebSocket with token resume; wire types
+src/sensors/          native (expo-location, expo-sensors) · web · sim (tests)
+src/game/             position, orientation, steps, zombies, tracking
+src/ui/ZombieLayer    places sprites over the camera, works out the aim
+src/ui/ZombieSprite   what a zombie looks like — the one file to swap for real art
+src/ui/               Glass kit, Reticle, FireButton, Radar, HealthBar, Squad, …
 src/screens/          Menu, Join, Lobby, Game, Summary
-e2e/                  Playwright: four browser contexts play a whole match
+e2e/                  Playwright: logic tests + simulated phones
 ```
 
 ## Tests
 
 ```sh
 npm run typecheck
-npm run e2e          # exports the web build, boots the backend, runs Playwright
+npm run test:logic   # position, orientation, steps, projection, aiming (no browser)
+npm run e2e          # builds the web app, boots a backend, plays with simulated phones
 ```
 
-The e2e drives sensors through `window.__loonieSim` (web build with `?sim=1`)
-so it can put four players at exact positions and headings, lock, fire,
-take damage, die, respawn, and finish a match. Screenshots land in
-`e2e/output/`.
+The e2e uses Google Chrome if it is installed, otherwise run
+`npx playwright install chromium` once. It starts its own backend on port
+8010 with fast pacing and serves the web build on 8082, so a dev server on
+8000/8081 is left alone.
+
+Sensors are driven through `window.__loonieSim` (web build with `?sim=1`):
+tests put each player at a map position, turn them to face a zombie, walk
+them with step and GPS events, and press the real on-screen buttons.
+Screenshots of every screen land in `e2e/output/`. The "camera" in those
+screenshots is a drawn corridor (`e2e/fakeCamera.ts`).
+
+## Things that can only be checked on a real phone
+
+- Which way zombies sit relative to the real world (compass + landscape
+  offset). The offset is taken from gravity; if zombies appear exactly behind
+  where they should be, the constant to flip is in `src/sensors/index.ts`
+  (`offsetFromGravity`).
+- Camera field of view (`CAMERA_HFOV_DEG` in `src/game/zombies.ts`, 66°). If
+  zombies drift sideways against the room as you turn, adjust it.
+- Step detection thresholds (`src/game/steps.ts`) with the phone on the gun.
+- How noisy GPS is in the building.
 
 ## Building for a phone without Expo Go
 
@@ -91,4 +98,4 @@ take damage, die, respawn, and finish a match. Screenshots land in
 npx expo prebuild
 npx expo run:ios      # or run:android
 ```
-Camera and location permissions are declared in `app.json`.
+Camera, location and motion permissions are declared in `app.json`.

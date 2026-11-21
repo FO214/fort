@@ -1,9 +1,9 @@
 /**
- * One WebSocket to the match server. Reconnects with the session token if
- * the link drops mid-match, so a dead zone costs a few seconds, not the game.
+ * One WebSocket to the game server. Reconnects with the session token if
+ * the link drops mid-mission, so a dead zone costs a few seconds, not the game.
  */
-import { serverNow, useStore } from '../store';
-import type { SensorFix, ServerMsg, Settings } from './types';
+import { useStore } from '../store';
+import type { ServerMsg, Settings } from './types';
 
 type First = { t: 'create'; name: string; settings: Partial<Settings> } | { t: 'join'; code: string; name: string }
   | { t: 'resume'; code: string; player_id: string; token: string };
@@ -12,7 +12,9 @@ class NetClient {
   private ws: WebSocket | null = null;
   private byUser = false;
   private retry = 0;
-  private seq = 0;
+  // Starts from the clock so a page reload mid-mission never reuses a number
+  // the server has already seen (it drops repeats).
+  private seq = Date.now();
   private timer: ReturnType<typeof setTimeout> | null = null;
 
   get isOpen() { return this.ws?.readyState === WebSocket.OPEN; }
@@ -67,23 +69,25 @@ class NetClient {
     if (this.isOpen) this.ws!.send(JSON.stringify(obj));
   }
 
-  pos(f: SensorFix) {
-    this.send({ t: 'pos', lat: f.lat, lon: f.lon, acc: f.acc, heading: f.heading, heading_acc: f.headingAcc, ts: serverNow() });
+  pos(x: number, y: number, acc: number, heading: number, pitch: number) {
+    const r = (v: number, d: number) => Math.round(v * d) / d;
+    this.send({ t: 'pos', x: r(x, 100), y: r(y, 100), acc: r(acc, 10), heading: r(heading, 10), pitch: r(Math.max(-90, Math.min(90, pitch)), 10) });
   }
 
-  fire(targetId: string | null): number {
+  /** One trigger pull: the zombies under the crosshair (nearest first) and where the gun pointed. */
+  fire(hits: number[], heading: number): number {
     const seq = ++this.seq;
-    this.send({ t: 'fire', seq, target_id: targetId, ts: serverNow() });
+    this.send({ t: 'fire', seq, hits: hits.slice(0, 8), heading: Math.round(heading * 10) / 10 });
     return seq;
   }
 
   reload() { this.send({ t: 'reload' }); }
   ready(ready: boolean) { this.send({ t: 'ready', ready }); }
-  setWeapon(weapon: string) { this.send({ t: 'set_weapon', weapon }); }
-  setTeam(team: 'alpha' | 'bravo') { this.send({ t: 'set_team', team }); }
-  settings(settings: Settings) { this.send({ t: 'settings', settings }); }
-  start() { this.send({ t: 'start' }); }
-  end() { this.send({ t: 'end' }); }
+  setClass(cls: string) { this.send({ t: 'set_class', cls }); }
+  /** Host only. The fix (if any) anchors a map that has no fixed place in the world. */
+  start(fix?: { lat: number; lon: number } | null) { this.send(fix ? { t: 'start', lat: fix.lat, lon: fix.lon } : { t: 'start' }); }
+  /** Host only: back to the lobby (aborts a running mission). */
+  reset() { this.send({ t: 'reset' }); }
 
   close() {
     this.byUser = true;
@@ -91,7 +95,7 @@ class NetClient {
     this.send({ t: 'leave' });
     this.ws?.close();
     this.ws = null;
-    this.seq = 0;
+    this.seq = Date.now();
     this.retry = 0;
     useStore.getState().setConnection('closed');
   }

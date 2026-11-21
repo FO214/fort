@@ -5,17 +5,17 @@ import { color, radius, space } from '../theme';
 import { Glass } from './Glass';
 import { T } from './T';
 
-export function KillFeed({ items }: { items: FeedItem[] }) {
+/** Short-lived squad news: waves, knocks, revives. */
+export function KillFeed({ items, now }: { items: FeedItem[]; now: number }) {
   return (
-    <View style={{ gap: space.xs }} testID="killfeed">
-      {items.slice(-4).map((it) => {
-        const tint = it.mine === 'kill' ? color.accent : it.mine === 'death' ? color.danger : undefined;
+    <View style={{ gap: space.xs }} testID="feed">
+      {items.filter((it) => now - it.at < 6).slice(-3).map((it) => {
+        const tint = it.tone === 'good' ? color.accent : it.tone === 'bad' ? color.danger : undefined;
         return (
           <Glass key={it.key} radius={radius.pill} tint={tint}
             contentStyle={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, height: 26 }}>
-            <T v="caption" c={it.mine === 'kill' ? color.accent : color.ink} style={{ fontWeight: '600' }}>{it.shooter}</T>
-            <T v="caption" c={color.ink3}>›</T>
-            <T v="caption" c={it.mine === 'death' ? color.danger : color.ink2}>{it.target}</T>
+            <T v="caption" c={tint ?? color.ink} style={{ fontWeight: '600' }}>{it.text}</T>
+            {it.detail ? <T v="caption" c={color.ink2}>{it.detail}</T> : null}
           </Glass>
         );
       })}

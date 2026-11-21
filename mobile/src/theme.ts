@@ -27,8 +27,6 @@ export const color = {
   danger: '#FF453A',
   dangerDim: 'rgba(255,69,58,0.22)',
   warning: '#FFD60A',
-  alpha: '#5AC8FA',
-  bravo: '#FF9F0A',
   onAccent: '#06110E',
 } as const;
 
@@ -50,6 +48,3 @@ export const type = {
   mono: { fontSize: 15, lineHeight: 18, fontWeight: '500' as const, fontVariant: ['tabular-nums'] as const },
   monoBig: { fontSize: 30, lineHeight: 34, fontWeight: '600' as const, fontVariant: ['tabular-nums'] as const, letterSpacing: -0.5 },
 };
-
-export const teamColor = (team: string | null | undefined) =>
-  team === 'alpha' ? color.alpha : team === 'bravo' ? color.bravo : color.ink;

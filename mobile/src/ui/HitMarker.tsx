@@ -7,12 +7,10 @@ import { color, radius, space } from '../theme';
 import { Glass } from './Glass';
 import { T } from './T';
 
-const REASON: Record<string, string> = {
-  no_target: 'No lock', off_target: 'Off target', range: 'Out of range', reloading: 'Reloading',
-  empty: 'Empty', cooldown: '', friendly: 'Friendly', protected: 'Protected', no_fix: 'No GPS fix',
-};
+/** Misses worth explaining. A plain miss (nothing under the crosshair) says nothing. */
+const REASON: Record<string, string> = { range: 'Out of range', reloading: 'Reloading', empty: 'Empty' };
 
-/** Centre X on a hit, brighter and labelled on a kill; a reason chip on a miss. */
+/** Centre X on a hit, brighter and labelled on a kill; a chip when a shot could not happen. */
 export function HitMarker({ shot }: { shot: ShotFeedback | undefined }) {
   const o = useSharedValue(0);
   const s = useSharedValue(1);
@@ -24,9 +22,8 @@ export function HitMarker({ shot }: { shot: ShotFeedback | undefined }) {
   const anim = useAnimatedStyle(() => ({ opacity: o.value, transform: [{ scale: s.value }] }));
   if (!shot || shot.reason === 'cooldown') return null;
   const col = shot.kind === 'kill' ? color.accent : color.ink;
-  const detail = shot.kind === 'miss'
-    ? `${REASON[shot.reason] ?? shot.reason}${shot.reason === 'off_target' && shot.off != null ? ` ${Math.round(shot.off)}°` : ''}${shot.reason === 'range' && shot.dist != null ? ` ${Math.round(shot.dist)} m` : ''}`
-    : shot.kind === 'kill' ? 'Eliminated' : '';
+  const detail = shot.kind === 'miss' ? REASON[shot.reason] ?? '' : shot.kind === 'kill' ? 'Kill' : '';
+  if (shot.kind === 'miss' && !detail) return null;
   return (
     <Animated.View style={[{ alignItems: 'center', gap: space.md }, anim]} pointerEvents="none" testID={`shot-${shot.kind}`}>
       {shot.kind !== 'miss' ? (

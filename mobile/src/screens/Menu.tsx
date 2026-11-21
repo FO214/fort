@@ -15,7 +15,7 @@ export function Menu() {
   const [busy, setBusy] = useState(false);
   const busyNow = busy || connection === 'connecting';
 
-  // Reload mid-match? Pick the session back up.
+  // Reopened mid-mission? Pick the session back up.
   useEffect(() => {
     if (!session || connection !== 'idle') return;
     net.connect(serverUrl, { t: 'resume', code: session.code, player_id: session.playerId, token: session.token })
@@ -35,10 +35,10 @@ export function Menu() {
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <View style={{ flex: 1, paddingHorizontal: space.xl, justifyContent: 'space-between', paddingBottom: space.xl }}>
           <View style={{ paddingTop: space.xxxl, gap: space.sm }}>
-            <T v="label" c={color.accent}>Real-world laser tag</T>
+            <T v="label" c={color.accent}>Co-op zombie extraction</T>
             <T v="display" testID="wordmark">LOONIE</T>
             <T v="body" c={color.ink2} style={{ maxWidth: 300 }}>
-              Point your phone, pull the trigger. Their phone takes the hit.
+              One building, one to four players. Fight to the helicopter and get out.
             </T>
           </View>
 
@@ -47,7 +47,7 @@ export function Menu() {
             <Field value={name} onChangeText={setName} placeholder="e.g. Ada" autoCapitalize="words" maxLength={20}
               testID="name" returnKeyType="done" />
             <View style={{ gap: space.sm, marginTop: space.xs }}>
-              <GlassButton label={busyNow ? 'Connecting…' : 'Create a game'} variant="primary" size="lg" onPress={create}
+              <GlassButton label={busyNow ? 'Connecting…' : 'Create a squad'} variant="primary" size="lg" onPress={create}
                 disabled={busyNow} testID="create" />
               <GlassButton label="Join with a code" size="lg" onPress={() => { setError(null); setPhase('join'); }} testID="join" />
             </View>

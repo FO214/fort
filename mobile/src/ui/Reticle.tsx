@@ -4,34 +4,39 @@ import Svg, { Circle, Line } from 'react-native-svg';
 import { color } from '../theme';
 
 /**
- * Four ticks that close inward as the lock acquires; ring and dot go mint
- * when the server would honour the shot. `kick` bumps it on every trigger pull.
+ * The gun sight. Four ticks around a centre dot; they close in and go mint
+ * when a zombie is under the crosshair. `kick` bumps it on every trigger pull.
+ * The centre of this view is the centre of the camera image.
  */
-export function Reticle({ progress, locked, lockable, kick, size = 176 }:
-  { progress: number; locked: boolean; lockable: boolean; kick: number; size?: number }) {
+export function Reticle({ onTarget, kick, size = 132 }: { onTarget: boolean; kick: number; size?: number }) {
   const c = size / 2;
   const outer = c - 6;
-  const tickLen = 14;
-  const tickAt = outer - 10 - (outer - 34) * progress;    // travel inward
-  const stroke = locked ? color.accent : lockable ? color.ink : color.ink3;
+  const tickLen = 12;
+  const tickAt = onTarget ? 26 : outer - 8;
+  const stroke = onTarget ? color.accent : color.ink2;
   const scale = useSharedValue(1);
   useEffect(() => {
-    if (kick) scale.value = withSequence(withTiming(1.08, { duration: 40 }), withTiming(1, { duration: 160, easing: Easing.out(Easing.quad) }));
+    if (kick) scale.value = withSequence(withTiming(1.1, { duration: 40 }), withTiming(1, { duration: 160, easing: Easing.out(Easing.quad) }));
   }, [kick, scale]);
   const anim = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
   const ticks = [0, 90, 180, 270].map((deg) => {
     const a = (deg * Math.PI) / 180;
     const x1 = c + Math.sin(a) * tickAt, y1 = c - Math.cos(a) * tickAt;
     const x2 = c + Math.sin(a) * (tickAt - tickLen), y2 = c - Math.cos(a) * (tickAt - tickLen);
-    return <Line key={deg} x1={x1} y1={y1} x2={x2} y2={y2} stroke={stroke} strokeWidth={locked ? 2.5 : 1.75} strokeLinecap="round" />;
+    return (
+      <React.Fragment key={deg}>
+        <Line x1={x1} y1={y1} x2={x2} y2={y2} stroke="rgba(0,0,0,0.45)" strokeWidth={onTarget ? 4.5 : 3.5} strokeLinecap="round" />
+        <Line x1={x1} y1={y1} x2={x2} y2={y2} stroke={stroke} strokeWidth={onTarget ? 2.5 : 1.75} strokeLinecap="round" />
+      </React.Fragment>
+    );
   });
   return (
-    <Animated.View style={anim} pointerEvents="none" testID="reticle" accessibilityLabel={locked ? 'locked' : lockable ? 'acquiring' : 'no target'}>
+    <Animated.View style={anim} pointerEvents="none" testID="reticle" accessibilityLabel={onTarget ? 'on target' : 'no target'}>
       <Svg width={size} height={size}>
-        <Circle cx={c} cy={c} r={outer} stroke={locked ? color.accent : color.ink4} strokeWidth={1} fill="none" opacity={locked ? 0.6 : 1} />
-        {locked && <Circle cx={c} cy={c} r={outer + 6} stroke={color.accent} strokeWidth={1} fill="none" opacity={0.25} />}
+        <Circle cx={c} cy={c} r={outer} stroke={onTarget ? color.accent : color.ink4} strokeWidth={1} fill="none" opacity={onTarget ? 0.55 : 1} />
         {ticks}
-        <Circle cx={c} cy={c} r={locked ? 3 : 2} fill={stroke} />
+        <Circle cx={c} cy={c} r={3.5} fill="rgba(0,0,0,0.45)" />
+        <Circle cx={c} cy={c} r={onTarget ? 2.5 : 2} fill={onTarget ? color.accent : color.ink} />
       </Svg>
     </Animated.View>
   );

@@ -11,9 +11,11 @@
     "expo-constants": "~57.0.19",
     "expo-font": "~57.0.4",
     "expo-haptics": "~57.0.3",
+    "expo-keep-awake": "~57.0.2",
     "expo-linear-gradient": "~57.0.2",
     "expo-location": "~57.0.19",
     "expo-screen-orientation": "~57.0.2",
+    "expo-sensors": "~57.0.3",
     "expo-status-bar": "~57.0.1",
     "react": "19.2.3",
     "react-dom": "^19.2.3",
@@ -39,10 +41,11 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "typecheck": "tsc --noEmit -p .",
+    "typecheck": "tsc --noEmit -p . && tsc --noEmit -p e2e",
     "export:web": "expo export --platform web --output-dir dist",
     "e2e": "npm run export:web && playwright test -c e2e/playwright.config.ts",
-    "e2e:only": "playwright test -c e2e/playwright.config.ts"
+    "e2e:only": "playwright test -c e2e/playwright.config.ts",
+    "test:logic": "LOGIC_ONLY=1 playwright test -c e2e/playwright.config.ts logic"
   },
   "private": true
 }

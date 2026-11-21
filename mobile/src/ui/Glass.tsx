@@ -25,7 +25,7 @@ export function Glass({ children, style, radius = R.lg, intensity = 40, strong, 
         intensity={intensity}
         tint="dark"
         experimentalBlurMethod={Platform.OS === 'android' ? 'dimezisBlurView' : undefined}
-        style={StyleSheet.absoluteFill}
+        style={[StyleSheet.absoluteFill, { borderRadius: radius }]}
       />
       <View style={[StyleSheet.absoluteFill, { backgroundColor: strong ? color.glassStrong : color.glass }]} />
       <LinearGradient

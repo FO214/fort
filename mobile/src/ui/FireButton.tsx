@@ -11,8 +11,8 @@ const R = SIZE / 2 - 5;
 const CIRC = 2 * Math.PI * R;
 
 /** The trigger. Ring = magazine; sweeps back while reloading. */
-export function FireButton({ ammo, magazine, reloadingUntil, reloadS, locked, disabled, onDown, onUp, now }:
-  { ammo: number; magazine: number; reloadingUntil: number; reloadS: number; locked: boolean; disabled?: boolean;
+export function FireButton({ ammo, magazine, reloadingUntil, reloadS, onTarget, disabled, onDown, onUp, now }:
+  { ammo: number; magazine: number; reloadingUntil: number; reloadS: number; onTarget: boolean; disabled?: boolean;
     onDown: () => void; onUp: () => void; now: number }) {
   const reloading = reloadingUntil > now;
   const [, tick] = useState(0);
@@ -22,7 +22,7 @@ export function FireButton({ ammo, magazine, reloadingUntil, reloadS, locked, di
     return () => clearInterval(id);
   }, [reloading]);
   const frac = reloading ? 1 - Math.max(0, reloadingUntil - now) / Math.max(0.1, reloadS) : magazine ? ammo / magazine : 0;
-  const ring = reloading ? color.accent : locked ? color.accent : color.ink;
+  const ring = reloading || onTarget ? color.accent : color.ink;
   const scale = useSharedValue(1);
   const anim = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
   // react-native-web only raises onPressIn for a held pointer; an instant
@@ -42,7 +42,7 @@ export function FireButton({ ammo, magazine, reloadingUntil, reloadS, locked, di
       >
         <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill}
           experimentalBlurMethod={Platform.OS === 'android' ? 'dimezisBlurView' : undefined} />
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: locked ? color.accentDim : color.glassStrong }]} />
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: onTarget ? color.accentDim : color.glassStrong }]} />
         <Svg width={SIZE} height={SIZE} style={StyleSheet.absoluteFill}>
           <Circle cx={SIZE / 2} cy={SIZE / 2} r={R} stroke={color.ink4} strokeWidth={3} fill="none" />
           <Circle
@@ -50,10 +50,10 @@ export function FireButton({ ammo, magazine, reloadingUntil, reloadS, locked, di
             strokeDasharray={`${CIRC * frac} ${CIRC}`} transform={`rotate(-90 ${SIZE / 2} ${SIZE / 2})`}
           />
         </Svg>
-        <T v="headline" c={locked ? color.accent : color.ink} style={{ fontSize: 20, letterSpacing: 2, fontWeight: '700' }}>
+        <T v="headline" c={onTarget ? color.accent : color.ink} style={{ fontSize: 20, letterSpacing: 2, fontWeight: '700' }}>
           {reloading ? '···' : 'FIRE'}
         </T>
-        <T v="label" c={locked ? color.accent : color.ink3} style={{ marginTop: 2 }}>{locked ? 'locked' : reloading ? 'reload' : ' '}</T>
+        <T v="label" c={color.ink3} style={{ marginTop: 2 }}>{reloading ? 'reload' : ' '}</T>
       </Pressable>
     </Animated.View>
   );

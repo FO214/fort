@@ -1,8 +1,6 @@
 import 'react-native-gesture-handler';
 import React, { useEffect, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import * as ScreenOrientation from 'expo-screen-orientation';
-import { Platform } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Game } from './src/screens/Game';
@@ -27,7 +25,6 @@ function Router() {
 export default function App() {
   const [ready, setReady] = useState(false);
   useEffect(() => {
-    if (Platform.OS !== 'web') ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
     useStore.getState().hydrate().finally(() => setReady(true));
   }, []);
   return (

@@ -1,26 +1,32 @@
 import React from 'react';
 import { View } from 'react-native';
-import Svg, { Circle, G, Line, Path, Text as SvgText } from 'react-native-svg';
-import type { PlayerPub, SensorFix } from '../net/types';
-import { bearingDeg, haversineM } from '../game/geo';
-import { color, teamColor } from '../theme';
-import { isEnemy } from '../game/aim';
+import Svg, { Circle, G, Line, Path, Rect, Text as SvgText } from 'react-native-svg';
+import { bearingXY, distXY } from '../game/geo';
+import type { PlayerSnap, ZombieRow } from '../net/types';
+import { color, font } from '../theme';
 
-/** You at the centre pointing up; everyone else placed by bearing and range. */
-export function Radar({ me, fix, players, rangeM, mode, size = 132 }:
-  { me: PlayerPub; fix: SensorFix | null; players: PlayerPub[]; rangeM: number; mode: 'ffa' | 'teams'; size?: number }) {
+export interface RadarView { x: number; y: number; heading: number | null }
+
+/**
+ * The minimap for now: you at the centre with the gun pointing up, zombies in
+ * red, the squad in mint, the helicopter as a yellow H. Anything further than
+ * `rangeM` is pinned to the rim. A real floor plan replaces this in step 5.
+ */
+export function Radar({ me, myId, squad, zombies, heli, rangeM = 30, size = 132 }: {
+  me: RadarView; myId: string | undefined; squad: PlayerSnap[]; zombies: ZombieRow[];
+  heli?: { x: number; y: number } | null; rangeM?: number; size?: number;
+}) {
   const c = size / 2;
   const rMax = c - 8;
-  const heading = fix?.heading ?? 0;
-  const dots = fix ? players.filter((p) => p.id !== me.id && p.lat != null && p.lon != null).map((p) => {
-    const dist = haversineM(fix.lat, fix.lon, p.lat!, p.lon!);
-    const rel = ((bearingDeg(fix.lat, fix.lon, p.lat!, p.lon!) - heading) * Math.PI) / 180;
+  const heading = me.heading ?? 0;
+  const place = (x: number, y: number) => {
+    const dist = distXY(me.x, me.y, x, y);
+    const rel = ((bearingXY(me.x, me.y, x, y) - heading) * Math.PI) / 180;
     const r = (Math.min(dist, rangeM) / rangeM) * rMax;
-    const enemy = isEnemy(me, p, mode);
-    const col = !p.alive ? color.ink4 : mode === 'teams' ? teamColor(p.team) : enemy ? color.danger : color.accent;
-    return { id: p.id, x: c + Math.sin(rel) * r, y: c - Math.cos(rel) * r, col, clamped: dist > rangeM, name: p.name };
-  }) : [];
-  const northA = ((-heading) * Math.PI) / 180;
+    return { x: c + Math.sin(rel) * r, y: c - Math.cos(rel) * r, far: dist > rangeM };
+  };
+  const northA = (-heading * Math.PI) / 180;
+  const h = heli ? place(heli.x, heli.y) : null;
   return (
     <View testID="radar">
       <Svg width={size} height={size}>
@@ -29,16 +35,30 @@ export function Radar({ me, fix, players, rangeM, mode, size = 132 }:
         <Line x1={c} y1={c - rMax} x2={c} y2={c + rMax} stroke={color.ink4} strokeWidth={0.5} />
         <Line x1={c - rMax} y1={c} x2={c + rMax} y2={c} stroke={color.ink4} strokeWidth={0.5} />
         <G transform={`translate(${c + Math.sin(northA) * (rMax - 7)} ${c - Math.cos(northA) * (rMax - 7)})`}>
-          <SvgText fill={color.ink2} fontSize={9} fontWeight="700" textAnchor="middle" y={3}>N</SvgText>
+          <SvgText fill={color.ink2} fontSize={9} fontWeight="700" fontFamily={font.family} textAnchor="middle" y={3}>N</SvgText>
         </G>
-        {dots.map((d) => (
-          <G key={d.id}>
-            <Circle cx={d.x} cy={d.y} r={d.clamped ? 3 : 4.5} fill={d.col} opacity={d.clamped ? 0.5 : 1} />
-            {!d.clamped && <Circle cx={d.x} cy={d.y} r={8} fill="none" stroke={d.col} strokeWidth={1} opacity={0.35} />}
+        {h && (
+          <G opacity={h.far ? 0.7 : 1}>
+            <Rect x={h.x - 6} y={h.y - 6} width={12} height={12} rx={3} fill={color.warning} />
+            <SvgText x={h.x} y={h.y + 3.2} fill={color.onAccent} fontSize={9} fontWeight="800" fontFamily={font.family} textAnchor="middle">H</SvgText>
           </G>
-        ))}
+        )}
+        {zombies.map((z) => {
+          const d = place(z[2], z[3]);
+          return <Circle key={`z${z[0]}`} cx={d.x} cy={d.y} r={d.far ? 2.2 : 3.2} fill={color.danger} opacity={d.far ? 0.55 : 1} />;
+        })}
+        {squad.filter((p) => p.id !== myId).map((p) => {
+          const d = place(p.x, p.y);
+          const col = p.st === 'alive' ? color.accent : p.st === 'knocked' ? color.warning : color.ink4;
+          return (
+            <G key={p.id}>
+              <Circle cx={d.x} cy={d.y} r={4.5} fill={col} opacity={d.far ? 0.6 : 1} />
+              {p.st === 'knocked' && <Circle cx={d.x} cy={d.y} r={8} fill="none" stroke={col} strokeWidth={1.2} opacity={0.7} />}
+            </G>
+          );
+        })}
         <Path d={`M ${c} ${c - 8} L ${c + 5.5} ${c + 6} L ${c} ${c + 3} L ${c - 5.5} ${c + 6} Z`} fill={color.ink} />
-        <SvgText x={c} y={size - 3} fill={color.ink3} fontSize={9} textAnchor="middle" fontWeight="600">{Math.round(rangeM)} m</SvgText>
+        <SvgText x={c} y={size - 3} fill={color.ink3} fontSize={9} fontFamily={font.family} textAnchor="middle" fontWeight="600">{Math.round(rangeM)} m</SvgText>
       </Svg>
     </View>
   );
