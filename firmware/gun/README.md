@@ -67,3 +67,18 @@ address for that network (e.g. 172.20.10.5, mask 255.255.255.240, router
 ## Pair
 
 Lobby → "Pair gun" → pull the trigger within 10 s.
+
+## A button does nothing
+
+Watch the log while pressing it (`~/pio/bin/pio device monitor`). A working
+press prints `trigger down` / `reload down`. If nothing prints, flash the
+wiring check, which reports every exposed pin that gets pulled to ground:
+
+```sh
+PLATFORMIO_BUILD_FLAGS=-DPIN_PROBE ~/pio/bin/pio run -t upload
+```
+
+Press the button and look for `probe: pin N LOW`. No line at all means the
+circuit isn't closing (usually a jumper that lost contact, or two button legs
+on the same side, which are always connected). A different pin means it is
+wired to the wrong hole. Flash the normal build again afterwards.

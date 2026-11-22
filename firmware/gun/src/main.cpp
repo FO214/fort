@@ -107,6 +107,7 @@ static String fixedServer;         // from the setup page; empty = discover
 static bool online = false;
 static bool haveTarget = false;    // ws.begin() has been called for the current server
 static uint32_t offlineSince = 0;
+static uint32_t wifiRetryAt = 0;      // last Wi-Fi join attempt
 
 static void sendBtn(const Button& b) {
   if (!online) return;
@@ -276,17 +277,25 @@ void loop() {
   wl_status_t st = WiFi.status();
   bool joined = st == WL_CONNECTED, wasJoined = lastStatus == WL_CONNECTED;
   if (joined != wasJoined || (!joined && now - lastWifiLog > 5000)) {
-    if (!joined && wasJoined) { setTx(TX_MAX); rssiAvg = 0; }       // lost the hotspot: rejoin loud
+    if (!joined && wasJoined) {                           // lost the hotspot: rejoin now, and loud
+      setTx(TX_MAX); rssiAvg = 0;
+      WiFi.reconnect();
+      wifiRetryAt = now;
+    }
+    if (joined && !wasJoined && haveTarget && !online && !fixedServer.length()) {
+      ws.disconnect();                                    // the old socket died with the link:
+      haveTarget = false;                                 // find the server again right away
+    }
     lastStatus = st; lastWifiLog = now;
     if (st == WL_CONNECTED) Serial.printf("wifi: connected, ip %s\n", WiFi.localIP().toString().c_str());
     else Serial.printf("wifi: not connected (status %d)\n", (int)st);
   }
   // Still not on Wi-Fi after a while: try again. A full scan is heavy on the
   // radio, so only list what is in range on the first retry and every 5 min.
-  static uint32_t lastRetry = 0, lastList = 0;
+  static uint32_t lastList = 0;
   static bool listed = false;
-  if (!joined && now - lastRetry > 30000) {               // long enough for a join to finish
-    lastRetry = now;
+  if (!joined && now - wifiRetryAt > 10000) {             // long enough for a join to finish
+    wifiRetryAt = now;
     WiFi.disconnect();
     if (!listed || now - lastList > 300000) {
       listed = true; lastList = now;
@@ -310,6 +319,24 @@ void loop() {
   }
   if (haveTarget) ws.loop();                              // reconnects on its own once Wi-Fi is up
 
+#ifdef PIN_PROBE
+  // Wiring check: report any exposed pin that gets pulled to GND. Skips the
+  // USB pins (19, 20), flash/PSRAM pins, and PIN_RELOAD_GND (kept low).
+  static const uint8_t probePins[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16, 17, 18, 21,
+                                      38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48};
+  static bool probeLow[sizeof probePins] = {};
+  static bool probeReady = false;
+  if (!probeReady) {
+    probeReady = true;
+    for (uint8_t p : probePins) if (p != PIN_RELOAD_GND) pinMode(p, INPUT_PULLUP);
+    Serial.println("probe: watching pins; press each button");
+  }
+  for (size_t i = 0; i < sizeof probePins; i++) {
+    if (probePins[i] == PIN_RELOAD_GND) continue;
+    bool low = digitalRead(probePins[i]) == LOW;
+    if (low != probeLow[i]) { probeLow[i] = low; Serial.printf("probe: pin %d %s\n", probePins[i], low ? "LOW" : "high"); }
+  }
+#endif
   static uint32_t lastTemp = 0;
   if (now - lastTemp > 10000) {
     lastTemp = now;
