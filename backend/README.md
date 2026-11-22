@@ -28,7 +28,8 @@ app/nav.py       walls: line of sight and corridor routes for zombies
 app/models.py    wire protocol and gun classes
 app/geo.py       geometry helpers
 maps/arena.json       built-in open test map
-maps/schmeichel.json  the building (real outline, placeholder interior)
+maps/schmeichel.json  the building's ground floor (real outline, interior from a walkthrough video)
+tools/build_schmeichel.py  generates that file; edit the numbers there
 ```
 
 ## How it works
@@ -102,6 +103,9 @@ any of them for one server with a JSON object in the environment:
 ```sh
 LOONIE_TUNING='{"grace_s": 2, "zombie_speed": 1.5}' .venv/bin/uvicorn app.main:app
 ```
+
+`LOONIE_DEFAULT_MAP=schmeichel` makes new squads start on the building map
+instead of the open arena (the host can still switch in the lobby).
 
 ## Deploy on AWS free tier
 

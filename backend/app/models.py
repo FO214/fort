@@ -2,6 +2,7 @@
 (type) field; the rest of the shape is documented per model."""
 from __future__ import annotations
 
+import os
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
@@ -35,9 +36,15 @@ DEFAULT_CLASS = "regular"
 
 # --------------------------------------------------------------------- settings
 
+def default_map() -> str:
+    """The map a new squad gets. Set LOONIE_DEFAULT_MAP on the server to start
+    every lobby on the building instead of the open arena."""
+    return os.environ.get("LOONIE_DEFAULT_MAP", "arena")
+
+
 class Settings(BaseModel):
     max_players: int = Field(4, ge=1, le=4)
-    map: str = Field("arena", pattern=r"^[a-z0-9_-]{1,32}$")
+    map: str = Field(default_factory=default_map, pattern=r"^[a-z0-9_-]{1,32}$")
 
 
 # ----------------------------------------------------------- phone -> server

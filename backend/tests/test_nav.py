@@ -254,10 +254,35 @@ def test_shipped_maps_are_sound(map_id):
         for p in m.spawn_points:
             s = nav.nearest_node(p)
             assert s == a or a in nav.next_hop[s], f"spawn point {p} cannot reach the start"
+            # A spawn point shut inside a room would send its zombie through a wall.
+            assert any(nav.clear(p, n) for n in nav.nodes.values()), f"spawn point {p} is walled in"
+        for name, p in (("start", m.start), ("helicopter", heli)):
+            assert any(nav.clear(p, n) for n in nav.nodes.values()), f"the {name} is walled in"
     if m.origin:
         lat, lon = m.to_latlon(*m.start)
         back = m.to_local(lat, lon)
         assert math.dist(back, m.start) < 0.01
+
+
+def test_schmeichel_matches_the_walkthrough():
+    """The layout the video shows: helicopter in the atrium between the two
+    real entrances, one straight concourse, the squad starting in the café at
+    the far end of the north wing."""
+    m = mapdata.load_map("schmeichel")
+    nav = m.nav
+    heli = (m.helicopter.x, m.helicopter.y)
+    west_entrance, south_east_entrance = (-3.5, -4.6), (30.1, -19.6)        # OSM entrance nodes
+    assert 12 < math.dist(heli, west_entrance) < 20
+    assert 18 < math.dist(heli, south_east_entrance) < 30
+    assert math.dist(heli, m.to_local(43.0072, -81.2764)) < 30               # the video's own GPS tag, +-30 m
+    assert 50 < math.dist(m.start, heli) < 65                                # about seven column bays
+    assert nav.clear(m.start, heli)                                          # you can see straight down the concourse
+    # The rooms east of the concourse are closed: no line of sight through the dark wall.
+    concourse, in_the_rooms = nav.nodes["concourse_mid"], (m.labels[1]["x"], m.labels[1]["y"])
+    assert m.labels[1]["text"] == "Rooms" and not nav.clear(concourse, in_the_rooms)
+    # The side corridor is the only way to the east exit doors.
+    assert nav.next_hop["concourse_mid"]["exit_doors"] == "concourse_south"
+    assert nav.next_hop["junction"]["exit_doors"] == "side_corridor"
 
 
 def test_schmeichel_sits_where_the_real_building_is():

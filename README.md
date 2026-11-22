@@ -22,17 +22,28 @@ docs/      the build spec
 | 2 | Phone AR + shooting | done |
 | 3 | Full mission: knock, revive, helicopter, holdout, extraction | done |
 | 4 | Guns: ESP32 firmware, `/device`, pairing | done: one gun tested end to end on an ESP32-S3 → `firmware/gun/README.md` |
-| 5 | Building map | machinery done; the Schmeichel map has the real outline but its interior is a placeholder until the walkthrough video can be read |
+| 5 | Building map | done: Schmeichel ground floor, real outline, interior from the walkthrough video; not yet checked on site |
 | 6–7 | Zombie variety, sound, real art | not started |
 
 ## The building map
 
-`backend/maps/schmeichel.json` is the Ronald D. Schmeichel Building at Western
-University. Its outline, position and orientation come from OpenStreetMap
-(way 1300081894), so a phone's GPS lands in the right place on it. What is
-inside the outline is **not real yet**: no interior walls, a corridor graph
-that just runs down the middle of the two wings, and a start and helicopter
-placed at opposite ends as guesses. The host picks the map in the lobby.
+`backend/maps/schmeichel.json` is the ground floor of the Ronald D. Schmeichel
+Building at Western University.
+
+- **Outline and position are real.** They come from OpenStreetMap (way
+  1300081894), so a phone's GPS lands in the right place on it.
+- **The interior comes from a walkthrough video, not a floor plan.** Expect
+  walls to be right to a few metres. It covers what the video shows: the
+  atrium at the building's elbow, the long concourse up the north wing, the
+  side corridor to the exit doors, and the Founders Café at the north end.
+  The rooms east of the concourse and the whole south wing are closed.
+- **The squad starts in the café. The helicopter is in the atrium**, about
+  15 m in from the main (courtyard) entrance, on the line of the concourse.
+  That is 59 m away, straight down the concourse.
+
+To change it, edit the numbers at the top of `backend/tools/build_schmeichel.py`
+and run it; do not edit the JSON by hand. The host picks the map in the lobby,
+or start the server with `LOONIE_DEFAULT_MAP=schmeichel` to make it the default.
 
 The helicopter sign to print is `docs/helicopter-qr.svg` (regenerate with
 `npm run heli-qr` in `mobile/`).
