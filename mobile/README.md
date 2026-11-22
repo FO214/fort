@@ -80,7 +80,8 @@ npm run export:web && npx serve -s dist -l 8081
 - **Zombies** (`src/game/zombies.ts`). The server sends positions 10 times a
   second; the phone draws the world 100 ms in the past, sliding between
   snapshots. The same numbers place a zombie on screen and decide whether
-  the crosshair is on it.
+  the crosshair is on it. The phone also works out which way each one is
+  walking, so it is drawn from the side this player sees it from.
 - **Shooting.** Fire sends the zombies under the crosshair (nearest first)
   and where the gun pointed. The server has the last word.
 - **Revive.** When a knocked teammate is within reach, a Hold to revive
@@ -114,7 +115,10 @@ src/ui/               shared pieces. Portrait: Button, TextField, MissionCodeInp
                       ObjectiveBanner, Minimap, MapView, HoldAction. Both: Icon, T, ProgressBar,
                       ProgressRing
 src/ui/ZombieLayer    places sprites over the camera, works out the aim, marks unseen zombies
-src/ui/ZombieSprite   what a zombie looks like: the one file to swap for real art
+src/ui/ZombieSprite   draws one frame of a zombie, plus its outline, hit flash and health
+src/ui/spriteBox      which frame, from which angle, and where it goes (pure maths, tested)
+src/ui/zombieSheets   where every frame is in the sheets (generated: npm run zombie-sprites)
+assets/zombies/       the sheets themselves (generated, with their credit)
 assets/sounds/        audio cues (shots and the knock are recordings: npm run sounds:import; the rest are generated: npm run sounds)
 e2e/                  Playwright: logic tests + simulated phones
 ```
@@ -166,6 +170,54 @@ npm run sounds       # assets/sounds/*.wav, synthesised placeholders
 npm run sounds:import  # the recorded cues, from ../sounds (needs ffmpeg); see scripts/recorded-sounds.mts
 ```
 
+## The zombies
+
+The zombies are a 3D model: a block-built, Minecraft-style zombie exported
+from Blockbench as glTF, kept in `assets/zombies/source/model.gltf` (six
+boxes on pivots, with its 64×32 skin embedded). See
+`assets/zombies/CREDITS.md` for what is and is not known about where it
+came from.
+
+The phone does not draw the model live. It is rendered ahead of time into
+sprite sheets (`assets/zombies/*.webp`), and the game draws flat frames from
+them, which a phone can do for a whole crowd. Each sheet is one animation of
+one type, seen from five angles: front, front quarter, side, back quarter,
+back. The other three sides are the same frames mirrored. `ZombieLayer`
+picks the angle from where the zombie is walking and where the player stands.
+
+The model file has no walk in it, so the movement is made by the render
+script (`pose` in `scripts/make-zombie-sprites.mts`): legs swinging, arms
+held out, clawing for the attack, and tipping over sideways when shot.
+
+| Type | Build | Moves | Edge light |
+|---|---|---|---|
+| Walker | the model as made | upright, arms straight out, an even plod | pale stone |
+| Runner | thin, long in the limb | pitched right forward at a sprint | rust |
+| Brute | half as wide again, arms like beams, small head | a slow, heavy, rocking walk | violet-grey |
+| Boss | tall and lopsided: one arm huge and dragging, one small and held out | the heavy walk | crimson |
+
+There is one model, so the other three types are the same boxes resized,
+posed and paced their own way. Every type has three sheets: move, attack,
+and die. A dark edge is drawn round every frame so a figure reads on a white
+wall; the lighting is set so it reads in a dark room. A test checks both
+from the brightness the renderer measured.
+
+To render them again (after changing a type's build or pose, the lighting,
+the number of frames, or the model itself):
+
+```sh
+npm run zombie-sprites                       # every type, from assets/zombies/source/
+npm run zombie-sprites -- --proof out.png    # also a page of sample frames over dark, mid and white
+npm run zombie-sprites -- --only walker      # one type; the generated modules are left alone
+npm run zombie-sprites -- <folder>           # a different model with the same part names
+```
+
+The script runs three.js in a headless browser, writes
+`assets/zombies/*.webp`, and regenerates `src/ui/zombieSheets.ts` (where
+every frame is) and `src/ui/zombieSources.ts` (the images). Nothing else in
+the app knows the model: to change the art, change the script's `KINDS` and
+`pose`, or point it at another model, and run it.
+
 ## Tests
 
 ```sh
@@ -213,6 +265,12 @@ in those screenshots is a drawn corridor (`e2e/fakeCamera.ts`).
 - How noisy GPS is in the building.
 - Blur on the HUD's glass panels (iOS and web blur; Android uses the opaque
   fallback), and how the plates read over real rooms in daylight.
+- The zombie sprites on a phone. On the web a frame is a box with the sheet
+  as its background; on a phone it is an `expo-image` of the whole sheet
+  behind a frame-sized window (`Cell` in `src/ui/ZombieSprite.tsx`). The web
+  path is the one the tests see. Check that frames do not blink when a
+  zombie first appears, starts biting or falls, and how a crowd of twenty
+  runs on an older phone.
 - Haptic patterns and the loudness of the audio cues against each other.
 - The zombie groan: how loud it is at each distance, and whether the pitch
   shift as one closes in reads as intended (the maths is tested; ears are not).

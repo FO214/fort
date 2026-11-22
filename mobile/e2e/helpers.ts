@@ -44,7 +44,10 @@ declare global {
     __loonieStore?: { getState: () => Record<string, any> };
     __loonieZombies?: { latest: () => ZRow[] };
     __loonieTracking?: { pose: () => Pose; position: { origin: [number, number] | null } };
-    __loonieAR?: { items: { id: number; x: number; y: number; h: number; dist: number; aimed: boolean }[]; aim: number[]; threats: number[] };
+    __loonieAR?: {
+      items: { id: number; x: number; y: number; h: number; dist: number; aimed: boolean; clip: 'move' | 'attack' | 'die'; row: number; mirror: boolean; frame: number }[];
+      aim: number[]; threats: number[];
+    };
   }
 }
 
