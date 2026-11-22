@@ -14,6 +14,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import TypeAdapter, ValidationError
 
+from . import discovery
 from . import models as m
 from .devices import Devices
 from .mapdata import available_maps, load_map
@@ -120,9 +121,12 @@ hub = Hub()
 @contextlib.asynccontextmanager
 async def lifespan(_: FastAPI):
     hub.start()
+    finder = await discovery.start()
     try:
         yield
     finally:
+        if finder is not None:
+            finder.close()
         await hub.stop()
 
 

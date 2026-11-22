@@ -11,10 +11,13 @@ Needs Python 3.10 or newer.
 ```sh
 python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
-.venv/bin/python -m pytest      # 72 tests, about 45 s (most of it is the live socket tests)
+.venv/bin/python -m pytest      # 80 tests, about 45 s (most of it is the live socket tests)
 ```
 
 Phones on the same Wi-Fi reach it at `ws://<your-laptop-ip>:8000/ws`.
+Guns find it by themselves: the server answers `LOONIE?` broadcasts on UDP 8001
+(`app/discovery.py`). Set `LOONIE_PORT` if uvicorn isn't on 8000, and
+`LOONIE_DISCOVERY_PORT` to move the UDP port.
 
 ## Layout
 
