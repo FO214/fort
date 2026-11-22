@@ -101,7 +101,8 @@ test('lobby: a host who leaves is asked first, and the lobby passes to the next 
   await ada.page.getByTestId('leave').click();
   await ada.page.getByTestId('leave-yes').click();
   await expect(ada.page.getByTestId('wordmark')).toBeVisible();
-  await expect(bo.page.getByTestId('start')).toBeVisible();                   // Bo hosts now
+  await expect(bo.page.getByTestId('start')).toBeVisible();                   // Bo hosts now, and is told so
+  await expect(bo.page.getByTestId('host-note')).toContainText('You are the host now');
   await expect(bo.page.getByTestId('player-Ada')).toHaveCount(0);
   await bo.page.getByTestId('leave').click();                                 // alone: no question asked
   await expect(bo.page.getByTestId('wordmark')).toBeVisible();

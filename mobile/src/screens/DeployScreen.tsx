@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Platform, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
+import { tracking } from '../game/tracking';
 import { useStore } from '../store';
 import { colors, fonts, space } from '../theme';
 import { Button } from '../ui/Button';
@@ -76,8 +77,8 @@ export function DeployScreen({ onRotated, onDone }: {
     rotate: { title: 'Rotate your phone', body: 'The mission is played sideways. Turn your phone on its side.' },
     mount: { title: 'Mount your phone', body: 'Clip it onto your blaster with the screen facing you and the camera clear.' },
     position: {
-      title: sensorError ? 'Location is off' : 'Getting your position',
-      body: sensorError ? 'Without it the squad cannot see where you are. Turn location on for FortIRL in Settings, or carry on from the start point.'
+      title: sensorError ? 'No position' : 'Getting your position',
+      body: sensorError ? 'Without location the squad cannot see where you are. Allow it for FortIRL in Settings and try again, or carry on from the start point.'
         : hasFix && gpsAcc! > GOOD_GPS_M ? 'The fix is loose. It tightens as you move; you can start.'
         : 'Hold still for a moment while GPS finds you in the building.',
     },
@@ -103,6 +104,7 @@ export function DeployScreen({ onRotated, onDone }: {
       {at === 'position' ? (
         <>
           <StatusChip icon={gps.icon} label={gps.label} tone={gps.tone} busy={gps.busy} style={{ alignSelf: landscape ? 'flex-start' : 'center' }} testID="deploy-gps" />
+          {sensorError ? <Button label="Try again" variant="primary" icon="retry" onPress={() => tracking.restart()} testID="deploy-retry" /> : null}
           {sensorError || (offerSkip && !hasFix)
             ? <Button label="Continue without GPS" onPress={() => setStep('countdown')} testID="deploy-skip-gps" />
             : null}

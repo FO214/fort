@@ -101,10 +101,12 @@ export function MatchScreen() {
   // Clock for the HUD (reload sweep, feed expiry, QR freshness). The AR layer has its own.
   const [now, setNow] = useState(serverNow());
   const [qrInView, setQrInView] = useState(false);
+  const [wrongQr, setWrongQr] = useState(false);
   useEffect(() => {
     const id = setInterval(() => {
       setNow(serverNow());
       setQrInView(!!heliQr && tracking.qrInView(heliQr));
+      setWrongQr(!!heliQr && tracking.wrongQrInView(heliQr));
     }, 200);
     return () => clearInterval(id);
   }, [heliQr]);
@@ -335,7 +337,7 @@ export function MatchScreen() {
             {target ? (
               <RevivePrompt name={nameOf(target.id)} holding={reviving} onHold={setReviveDown} progress={target.rb === myId ? target.rv : 0} />
             ) : final && alive ? (
-              <ExtractionOverlay qrInView={qrInView} holding={extracting} progress={s.extract.progress}
+              <ExtractionOverlay qrInView={qrInView} wrongCode={wrongQr} holding={extracting} progress={s.extract.progress}
                 holders={s.extract.holders.length} need={s.extract.need} onHold={setExtractDown} />
             ) : null}
           </View>
@@ -361,7 +363,7 @@ export function MatchScreen() {
       <ConnectionOverlay onLeave={leave} />
 
       {menu ? (
-        <HudMenu isHost={isHost} canMarkArrived={canArrive}
+        <HudMenu isHost={isHost} canMarkArrived={canArrive} gun={s.gun} pairingUntil={s.pairingUntil} onPair={() => { net.pairGun(); s.startPairing(); }}
           onArrived={() => net.arrived()} onAbort={() => { setMenu(false); net.reset(); }} onLeave={leave} onClose={() => setMenu(false)} />
       ) : null}
 

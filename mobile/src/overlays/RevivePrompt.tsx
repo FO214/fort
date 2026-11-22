@@ -50,7 +50,7 @@ export function RevivePrompt({ name, holding, progress, onHold }: {
   }, [interrupted]);
 
   const blocked = holding && progress <= 0;
-  const detail = !holding ? 'They are down next to you. Press and hold.'
+  const detail = !holding ? 'Down next to you. Press and hold.'
     : interrupted ? 'Interrupted. Keep holding.'
     : blocked ? 'Clear the zombies first'
     : 'Stay close and keep holding';

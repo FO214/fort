@@ -56,6 +56,17 @@ class Tracking {
     };
   }
 
+  /**
+   * Stop and start the sensors again, for whoever is holding them. This is
+   * the retry after location was refused and has since been allowed.
+   */
+  restart(): void {
+    if (this.holders === 0) return;
+    this.stop?.();
+    useStore.getState().setSensorError(null);
+    this.stop = startSensors((e) => this.handle(e));
+  }
+
   /** A mission started: this is where the map sits in the real world. */
   setFrame(map: MapInfo): void {
     const t = clock();
@@ -71,6 +82,12 @@ class Tracking {
   qrInView(expected: string): boolean {
     const q = this.qr;
     return !!q && q.data === expected && (q.held || clock() - q.at < QR_FRESH_S);
+  }
+
+  /** Is some other code in front of the camera: a QR, but not this one? */
+  wrongQrInView(expected: string): boolean {
+    const q = this.qr;
+    return !!q && q.data !== expected && (q.held || clock() - q.at < QR_FRESH_S);
   }
 
   /** The gun just fired; do not mistake the jolt for a step. */

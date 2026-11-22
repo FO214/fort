@@ -7,6 +7,7 @@ import { Meter, ProgressBar } from '../ui/ProgressBar';
 import { T } from '../ui/T';
 
 const CRITICAL = 0.34;
+const EDGE = alpha(colors.status.danger, 0.55), CLEAR = alpha(colors.status.danger, 0);
 
 /**
  * You are down. The world is dimmed and tinted, not blurred: you can still
@@ -31,8 +32,8 @@ export function KnockedOverlay({ bleed, reviver, reviveProgress, nearest }: {
     <View style={StyleSheet.absoluteFill} pointerEvents="none" testID="knocked">
       {/* The scene dims, and red closes in from the two sides. The middle stays readable. */}
       <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.dim.knocked }]} />
-      <LinearGradient colors={[alpha(colors.status.danger, 0.5), alpha(colors.status.danger, 0)]} start={{ x: 0, y: 0 }} end={{ x: 0.24, y: 0 }} style={StyleSheet.absoluteFill} />
-      <LinearGradient colors={[alpha(colors.status.danger, 0.5), alpha(colors.status.danger, 0)]} start={{ x: 1, y: 0 }} end={{ x: 0.76, y: 0 }} style={StyleSheet.absoluteFill} />
+      <LinearGradient colors={[EDGE, CLEAR]} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={[styles.side, { left: 0 }]} />
+      <LinearGradient colors={[CLEAR, EDGE]} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={[styles.side, { right: 0 }]} />
 
       <View style={styles.centre}>
         <Icon name="knocked" size={46} color={colors.status.danger} />
@@ -61,4 +62,6 @@ export function KnockedOverlay({ bleed, reviver, reviveProgress, nearest }: {
 const styles = StyleSheet.create({
   centre: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', gap: space[1], paddingHorizontal: space[6] },
   bars: { width: 340, maxWidth: '100%', gap: space[3] },
+  // Each band is its own strip: a quarter of the screen, fading inward.
+  side: { position: 'absolute', top: 0, bottom: 0, width: '24%' },
 });

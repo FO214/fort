@@ -15,7 +15,7 @@ import { T } from './T';
  * the server reports, so a hold that is blocked shows as empty rather than
  * pretending to move.
  */
-export function HoldAction({ title, detail, icon, reading, progress, tint = colors.brand.amber, holding, blocked, onHold, testID, width = 340 }: {
+export function HoldAction({ title, detail, icon, reading, progress, tint = colors.brand.amber, holding, blocked, onHold, testID, width = 372 }: {
   title: string;
   /** What to do, or why nothing is happening. */
   detail?: string;
@@ -56,7 +56,7 @@ export function HoldAction({ title, detail, icon, reading, progress, tint = colo
         </ProgressRing>
         <View style={{ flex: 1, gap: 2 }}>
           <T v="hudTitle" c={colors.textPrimary} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{title}</T>
-          {detail ? <T v="hudSecondary" c={blocked ? colors.textPrimary : colors.textSecondary} numberOfLines={1}>{detail}</T> : null}
+          {detail ? <T v="hudSecondary" c={blocked ? colors.textPrimary : colors.textSecondary} numberOfLines={2}>{detail}</T> : null}
         </View>
       </HudPanel>
     </Pressable>

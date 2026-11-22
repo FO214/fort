@@ -155,6 +155,7 @@ export function LobbyScreen() {
   const footer = (
     <View style={styles.footer}>
       {s.error ? <FieldMessage tone="error" text={s.error} testID="error" /> : null}
+      {s.hostNote ? <FieldMessage tone="info" text={s.hostNote} testID="host-note" /> : null}
       {isHost ? (
         <View style={{ flexDirection: 'row', gap: space[3] }}>
           {ready}

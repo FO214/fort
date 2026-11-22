@@ -40,8 +40,9 @@ export function HudPanel({ children, material = 'backing', strong, radius = R.xs
       ]}>
       {blur ? (
         <>
-          <BlurView intensity={materials.glass.intensity} tint={materials.glass.tint} style={StyleSheet.absoluteFill} />
-          <View style={[StyleSheet.absoluteFill, { backgroundColor: materials.glass.overlay }]} />
+          {/* The blur carries the radius itself: a parent's rounded clip does not always clip a backdrop blur. */}
+          <BlurView intensity={materials.glass.intensity} tint={materials.glass.tint} style={[StyleSheet.absoluteFill, { borderRadius: radius, overflow: 'hidden' }]} />
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: materials.glass.overlay, borderRadius: radius }]} />
         </>
       ) : null}
       {accent ? <View style={[styles.accent, { backgroundColor: accent }]} /> : null}

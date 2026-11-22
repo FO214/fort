@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
+import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { FormationMark } from '../brand/Brand';
 import { feedback } from '../game/feedback';
@@ -9,13 +10,14 @@ import { net } from '../net/client';
 import { ConnectionBanner } from '../overlays/ConnectionOverlay';
 import type { PlayerState } from '../net/types';
 import { useStore } from '../store';
-import { borders, colors, space } from '../theme';
+import { borders, colors, motion, space } from '../theme';
 import { Button } from '../ui/Button';
 import { Divider, SectionRule } from '../ui/Panel';
 import { PlayerMarker } from '../ui/PlayerMarker';
 import { Backdrop, CONTENT_MAX } from '../ui/Screen';
 import { StatusChip } from '../ui/StatusChip';
 import { T } from '../ui/T';
+import { settle, useReducedMotion } from '../ui/motion';
 
 /**
  * How it ended. The outcome is the biggest thing on the screen; the squad's
@@ -33,13 +35,18 @@ export function ResultsScreen() {
   const won = e?.outcome === 'extracted';
   // The outcome's own cue, once, when the screen arrives.
   useEffect(() => { if (e) feedback(won ? 'win' : 'loss'); }, [e, won]);
+  // The outcome arrives: one short rise, or none at all with reduced motion.
+  const reduced = useReducedMotion();
+  const shown = useSharedValue(0);
+  useEffect(() => { shown.value = settle(1, reduced, motion.slow); }, [reduced, shown]);
+  const reveal = useAnimatedStyle(() => ({ opacity: shown.value, transform: [{ translateY: (1 - shown.value) * 10 }] }));
   const sum = (pick: (r: (typeof results)[number]) => number) => results.reduce((n, r) => n + pick(r), 0);
   // Whoever was still down when the helicopter left did not make it.
   const fate = (state: PlayerState) =>
     state === 'dead' ? 'Dead' : state === 'knocked' ? (won ? 'Left behind' : 'Knocked') : won ? 'Extracted' : 'Standing';
 
   const outcome = (
-    <View style={{ alignItems: 'center', gap: space[3] }}>
+    <Animated.View style={[{ alignItems: 'center', gap: space[3] }, reveal]}>
       <FormationMark size={wide ? 44 : 60} color={won ? colors.brand.amber : colors.textSecondary} />
       <T v="displayXL" c={won ? colors.textPrimary : colors.status.danger} center testID="outcome" accessibilityRole="header"
         adjustsFontSizeToFit numberOfLines={1}>
@@ -51,7 +58,7 @@ export function ResultsScreen() {
       <T v="technical" c={colors.textMuted} center testID="mission-id">
         MISSION {s.session?.code ?? '····'} · {(s.map?.name ?? '').toUpperCase()}
       </T>
-    </View>
+    </Animated.View>
   );
 
   const squadStats = (
@@ -97,6 +104,7 @@ export function ResultsScreen() {
   const actions = (
     <View style={{ gap: space[3] }}>
       <ConnectionBanner />
+      {s.hostNote ? <StatusChip icon="host" tone="objective" label={s.hostNote} style={{ alignSelf: 'center' }} testID="host-note" /> : null}
       {isHost ? (
         <Button label="Play again" variant="primary" onPress={() => net.reset()} testID="again" />
       ) : host && !host.connected ? (

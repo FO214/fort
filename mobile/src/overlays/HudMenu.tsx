@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { View, useWindowDimensions } from 'react-native';
-import { HUD_SCALES, useStore } from '../store';
+import { HUD_SCALES, useStore, type GunLink } from '../store';
 import { colors, space } from '../theme';
 import { Button } from '../ui/Button';
 import { Segmented, ToggleRow } from '../ui/Controls';
+import { PairGunControl } from '../ui/PairGunControl';
 import { Divider } from '../ui/Panel';
 import { Sheet } from '../ui/Sheet';
 import { T } from '../ui/T';
@@ -14,10 +15,11 @@ const SCALE_LABEL: Record<number, string> = { [HUD_SCALES[0]]: 'Compact', [HUD_S
  * The mission menu: the handful of things that are worth a touch mid-match.
  * Ending the mission for everyone, or leaving it, asks twice.
  */
-export function HudMenu({ isHost, canMarkArrived, onArrived, onAbort, onLeave, onClose }: {
+export function HudMenu({ isHost, canMarkArrived, gun, pairingUntil, onPair, onArrived, onAbort, onLeave, onClose }: {
   isHost: boolean;
   /** Host, on the journey: GPS can refuse to admit the squad has arrived. */
   canMarkArrived: boolean;
+  gun: GunLink; pairingUntil: number; onPair: () => void;
   onArrived: () => void; onAbort: () => void; onLeave: () => void; onClose: () => void;
 }) {
   const prefs = useStore((s) => s.prefs);
@@ -51,6 +53,8 @@ export function HudMenu({ isHost, canMarkArrived, onArrived, onAbort, onLeave, o
   ) : null;
   const exits = (
     <View style={{ gap: space[3] }}>
+      {/* A blaster that dropped off, or was never paired, can be paired from here. */}
+      <PairGunControl gun={gun} pairingUntil={pairingUntil} onPair={onPair} />
       <Button label="Leave mission" size="md" icon="leave" onPress={() => setConfirm('leave')} testID="leave" />
       {isHost ? <Button label="Abort mission" size="md" icon="close" onPress={() => setConfirm('abort')} testID="abort" /> : null}
     </View>

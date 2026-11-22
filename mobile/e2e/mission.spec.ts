@@ -258,7 +258,7 @@ test('full mission: knocked and revived, reach the helicopter, hold, two extract
     // No code in view: nothing to hold. The wrong code does not count either.
     await expect(ada.page.getByTestId('extract-aim')).toBeVisible();
     await showQr(ada.page, 'SOME-OTHER-CODE');
-    await ada.page.waitForTimeout(500);
+    await expect(ada.page.getByTestId('extract-wrong')).toContainText('not the helicopter code');
     await expect(ada.page.getByTestId('extract-hold')).toHaveCount(0);
     await shot(ada.page, '15-final-aim-at-code');
 

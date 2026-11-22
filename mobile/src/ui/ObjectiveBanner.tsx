@@ -60,7 +60,7 @@ export function ObjectiveBanner({ mission, extract, me, heli, maxWidth, children
     body = (
       <View style={styles.line}>
         <T v="hudLabel" testID="hold-count">Wave {Math.min(done + 1, total)} of {total}</T>
-        <ProgressBar value={total ? done / total : 0} segments={total} color={colors.status.objective} track={colors.borderStrong} height={7} style={{ width: 24 * total }} />
+        <ProgressBar value={total ? done / total : 0} segments={total} color={colors.status.objective} track={colors.border} height={7} style={{ width: 24 * total }} />
       </View>
     );
   } else {
@@ -68,7 +68,7 @@ export function ObjectiveBanner({ mission, extract, me, heli, maxWidth, children
     title = 'Extract now';
     body = (
       <View style={{ gap: space[1], alignSelf: 'stretch' }}>
-        <ProgressBar value={extract.progress} color={colors.status.objective} track={colors.borderStrong} height={9} testID="extract-bar"
+        <ProgressBar value={extract.progress} color={colors.status.objective} track={colors.border} height={9} testID="extract-bar"
           accessibilityLabel={`extraction ${Math.round(extract.progress * 100)} percent`} />
         <T v="hudSecondary" center testID="extract-holders">{extractionLine(holding, extract.need, extract.progress)}</T>
       </View>

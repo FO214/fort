@@ -85,6 +85,9 @@ interface State {
   lostAt: number;
   prefs: Prefs;
   setPrefs: (p: Partial<Prefs>) => void;
+  /** Set when the host leaves and the server hands the mission to someone else. */
+  hostNote: string | null;
+  setHostNote: (n: string | null) => void;
   /** The design-system gallery is open (a QA screen, not part of the game). */
   gallery: boolean;
   setGallery: (v: boolean) => void;
@@ -102,7 +105,9 @@ interface State {
   hydrate: () => Promise<void>;
 }
 
-const KEY = 'loonie.prefs.v2';
+/** `?profile=name` keeps a second simulated phone in the same browser from sharing this one's saved session. */
+const PROFILE = typeof window !== 'undefined' && !!window.location?.search ? new URLSearchParams(window.location.search).get('profile') : null;
+const KEY = PROFILE ? `loonie.prefs.v2:${PROFILE}` : 'loonie.prefs.v2';
 const DEFAULT_PREFS: Prefs = { haptics: true, sound: true, hudScale: 1 };
 /** Tests and the walkthrough can skip the deploy sequence with `?deploy=skip`. */
 const SKIP_DEPLOY = typeof window !== 'undefined' && !!window.location?.search
@@ -173,6 +178,8 @@ export const useStore = create<State>((set, get) => ({
   prefs: DEFAULT_PREFS,
   gallery: typeof window !== 'undefined' && !!window.location?.search && new URLSearchParams(window.location.search).get('gallery') === '1',
   setGallery: (gallery) => set({ gallery }),
+  hostNote: null,
+  setHostNote: (hostNote) => set({ hostNote }),
 
   setName: (name) => { set({ name }); persist(get); },
   setServerUrl: (serverUrl) => { set({ serverUrl }); persist(get); },
@@ -181,6 +188,9 @@ export const useStore = create<State>((set, get) => ({
   setConnection: (connection) => set((st) => ({
     connection,
     lostAt: connection === 'open' || connection === 'idle' ? 0 : st.lostAt || Date.now() / 1000,
+    // Back after a drop, mid-mission: say so. The mission state comes with the next snapshot.
+    ...(connection === 'open' && st.connection === 'reconnecting' && st.phase === 'playing'
+      ? { banner: bannerOf('Reconnected', 'neutral', 'Back in the mission') } : {}),
   })),
   setDeployed: (deployed) => set({ deployed }),
   setPrefs: (p) => { set((st) => ({ prefs: { ...st.prefs, ...p } })); persist(get); },
@@ -207,6 +217,13 @@ export const useStore = create<State>((set, get) => ({
       }
       case 'lobby': {
         const next: Partial<State> = { hostId: m.host_id, settings: m.settings, roster: m.players, roomPhase: m.phase };
+        // The host left and the server passed the mission on: tell everyone who has it now.
+        if (s.hostId && m.host_id !== s.hostId) {
+          const mine = m.host_id === myId;
+          const who = m.players.find((p) => p.id === m.host_id)?.name ?? 'Someone else';
+          next.hostNote = mine ? 'The host left. You are the host now.' : `The host left. ${who} is the host now.`;
+          if (s.phase === 'playing') next.banner = bannerOf(mine ? 'You are the host' : 'Host left', 'neutral', mine ? 'The mission menu is yours' : `${who} is the host now`);
+        }
         // In the lobby the host may switch maps. Mid-mission `started` owns the map (it carries the anchor).
         if (m.phase === 'lobby' && m.map) next.map = m.map;
         if (m.phase === 'lobby' && (s.phase === 'playing' || s.phase === 'summary')) {
@@ -323,7 +340,7 @@ export const useStore = create<State>((set, get) => ({
     set({
       phase: 'menu', session: null, hostId: null, roster: [], settings: null, roomPhase: 'lobby',
       ended: null, feed: [], banner: null, shots: [], damages: [], squad: [], mission: NO_MISSION, extract: NO_EXTRACT, zombieCount: 0,
-      error: null, connection: 'idle', lostAt: 0, gun: 'none', deployed: true,
+      error: null, connection: 'idle', lostAt: 0, gun: 'none', deployed: true, hostNote: null,
     });
     persist(get, null);
   },

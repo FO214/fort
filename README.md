@@ -1,10 +1,17 @@
-# LOONIE PvE
+# FortIRL
 
-A 1–4 player co-op zombie game played on phones mounted on Nerf guns, inside
-one building. The server owns the zombies; each phone draws them over its
-camera from its own position and heading, and the crosshair is the gun sight.
+**Survive together.** A 1–4 player co-op zombie game played on phones mounted
+on Nerf guns, inside one building. The server owns the zombies; each phone
+draws them over its camera from its own position and heading, and the
+crosshair is the gun sight.
 
-The build spec is [docs/pve-plan.md](docs/pve-plan.md).
+The build spec is [docs/pve-plan.md](docs/pve-plan.md). The interface follows
+the BLACKSITE design system: see [mobile/README.md](mobile/README.md#the-design-system).
+
+(The project started life as LOONIE. The name survives in a few identifiers
+that are not worth breaking: the `LOONIE_TUNING` and `LOONIE_DEFAULT_MAP`
+server settings, the `LOONIE:HELI` text on the printed helicopter sign, and
+the test hooks.)
 
 ```
 backend/   FastAPI + WebSocket server: world, waves, mission, rules   → backend/README.md
@@ -23,7 +30,9 @@ docs/      the build spec
 | 3 | Full mission: knock, revive, helicopter, holdout, extraction | done |
 | 4 | Guns: ESP32 firmware, `/device`, pairing | done: one gun tested end to end on an ESP32-S3 → `firmware/gun/README.md` |
 | 5 | Building map | done: Schmeichel ground floor, real outline, interior from the walkthrough video; not yet checked on site |
-| 6–7 | Zombie variety, sound, real art | not started |
+| 6 | Variety and feel | part done: four gun classes (as plain stat tables: no shotgun cone or rifle pierce yet), sound and haptic cues, keep-awake. The phone can draw walkers, runners, brutes and a boss; the server still only spawns walkers |
+| 7 | Real zombie art | not started: the four types are drawn in code, behind the one component to swap |
+| UI | BLACKSITE design system | done: every screen, the HUD and all overlays → `mobile/README.md` |
 
 ## The building map
 
@@ -71,6 +80,19 @@ cd mobile && npm run typecheck && npm run e2e
 ## Decisions made while building
 
 These go beyond the spec, or settle something it left open.
+
+- **Four gun classes: pistol, SMG, shotgun, rifle.** The lobby's class cards
+  come straight from the server's table. Pistol, SMG and rifle carry the
+  numbers the original regular, light and heavy classes had; the shotgun is
+  new (hard-hitting, forgiving aim, 12 m reach). They differ only in their
+  numbers so far.
+- **The host can only start once everyone connected is ready.** The phone
+  enforces this and says who it is waiting for; the server would still accept
+  a start, so an older client is not locked out.
+- **A deploy step sits between the lobby and the mission**: turn the phone,
+  mount it, wait for a position, count in. The mission clock is the server's
+  and is already running, so the step is short and a phone that rejoins
+  mid-mission skips it.
 
 - **The arena has no place in the real world.** The host's GPS fix at the
   moment they press Start becomes map (0, 0) for everyone, and the helicopter

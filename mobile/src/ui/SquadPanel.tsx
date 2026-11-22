@@ -72,9 +72,13 @@ function Mate({ p, name, identity, compact, width }: { p: PlayerSnap; name: stri
         <>
           <Icon name={down.icon} size={15} color={colors.status.danger} />
           <T v="hudMicro" c={colors.textPrimary}>{down.label}</T>
-          {p.st === 'knocked' && !compact ? (
-            // Being revived: the revive filling. Otherwise: the bleed-out draining.
-            <ProgressBar value={p.rb ? p.rv : p.bl} color={p.rb ? colors.status.health : colors.status.danger} track={colors.border} height={5} style={{ width: 34 }} />
+          {p.st === 'knocked' ? (
+            // Along the bottom edge, so the name keeps its room. Being revived: the revive
+            // filling. Otherwise: the bleed-out draining.
+            <View style={styles.underline}>
+              <ProgressBar value={p.rb ? p.rv : p.bl} color={p.rb ? colors.status.health : colors.status.danger} track={colors.border} height={3}
+                accessibilityLabel={p.rb ? 'Revive progress' : 'Bleed-out'} />
+            </View>
           ) : null}
         </>
       ) : !p.on ? (
@@ -115,7 +119,8 @@ const styles = StyleSheet.create({
   own: { paddingHorizontal: space[3], paddingTop: space[1] + 2, paddingBottom: space[2], gap: space[1] },
   line: { flexDirection: 'row', alignItems: 'center', gap: space[2] },
   mate: { flexDirection: 'row', alignItems: 'center', gap: space[2], paddingLeft: space[3], paddingRight: space[2], minHeight: 28 },
-  mateName: { flex: 1 },
+  mateName: { flex: 1, minWidth: 48 },
+  underline: { position: 'absolute', left: 0, right: 0, bottom: 0 },
   mateHp: { minWidth: 30, textAlign: 'right', fontVariant: ['tabular-nums'] },
   news: { flexDirection: 'row', alignItems: 'center', gap: space[2], paddingLeft: space[3], paddingRight: space[3], minHeight: 28 },
 });
