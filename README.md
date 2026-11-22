@@ -41,8 +41,10 @@ Building at Western University.
   15 m in from the main (courtyard) entrance, on the line of the concourse.
   That is 59 m away, straight down the concourse.
 
-To change it, edit the numbers at the top of `backend/tools/build_schmeichel.py`
-and run it; do not edit the JSON by hand. The host picks the map in the lobby,
+`docs/schmeichel-map.svg` is a picture of it (walls, zombie routes, spawn
+points, start, helicopter) to check against the real place. To change the
+map, edit the numbers at the top of `backend/tools/build_schmeichel.py` and
+run it; that rewrites both the JSON and the picture. The host picks the map in the lobby,
 or start the server with `LOONIE_DEFAULT_MAP=schmeichel` to make it the default.
 
 The helicopter sign to print is `docs/helicopter-qr.svg` (regenerate with

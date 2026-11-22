@@ -1,4 +1,5 @@
-"""Builds maps/schmeichel.json: the ground floor of the Schmeichel Building.
+"""Builds maps/schmeichel.json: the ground floor of the Schmeichel Building,
+and docs/schmeichel-map.svg, a picture of it to check against the real place.
 
 Run from backend/:   python tools/build_schmeichel.py
 
@@ -33,6 +34,7 @@ import math
 from pathlib import Path
 
 OUT = Path(__file__).resolve().parent.parent / "maps" / "schmeichel.json"
+PLAN = Path(__file__).resolve().parent.parent.parent / "docs" / "schmeichel-map.svg"
 
 # ---- the real outline (metres from the footprint's centre) -----------------
 OUTLINE = [
@@ -143,9 +145,68 @@ def build() -> dict:
     }
 
 
+def render_plan(data: dict) -> str:
+    """A picture of the map to check against the real building: walls, the
+    corridor routes zombies use, where they spawn, the start and the helicopter."""
+    scale, margin = 9.0, 9.0                      # pixels per metre; metres of border
+    xs, ys = [p[0] for p in data["outline"]], [p[1] for p in data["outline"]]
+    min_x, max_y = min(xs) - margin, max(ys) + margin
+    width, height = (max(xs) - min(xs) + margin * 2) * scale, (max(ys) - min(ys) + margin * 2) * scale + 60
+
+    def px(p):
+        return f"{(p[0] - min_x) * scale:.1f},{(max_y - p[1]) * scale + 60:.1f}"
+
+    def xy(p):
+        return (p[0] - min_x) * scale, (max_y - p[1]) * scale + 60
+
+    font = 'font-family="Helvetica, Arial, sans-serif"'
+    out = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{width:.0f}" height="{height:.0f}" viewBox="0 0 {width:.0f} {height:.0f}">',
+           f'<title>{data["name"]}</title>', f'<rect width="{width:.0f}" height="{height:.0f}" fill="#ffffff"/>',
+           f'<text x="16" y="26" {font} font-size="18" font-weight="700">{data["name"]}</text>',
+           f'<text x="16" y="46" {font} font-size="12" fill="#555555">Outline from OpenStreetMap. Interior from a walkthrough video: right to a few metres, not a survey. North is up.</text>',
+           f'<polygon points="{" ".join(px(p) for p in data["outline"])}" fill="#f1f3f5" stroke="none"/>']
+    nodes = data["graph"]["nodes"]
+    for a, b in data["graph"]["edges"]:
+        (x1, y1), (x2, y2) = xy(nodes[a]), xy(nodes[b])
+        out.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" stroke="#2563eb" stroke-width="1.5" stroke-dasharray="5 4"/>')
+    for w in data["walls"]:
+        (x1, y1), (x2, y2) = xy(w[:2]), xy(w[2:])
+        out.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" stroke="#111111" stroke-width="2.5" stroke-linecap="round"/>')
+    for p in data["spawn_points"]:
+        x, y = xy(p)
+        out.append(f'<path d="M {x:.1f} {y - 5:.1f} L {x + 4.5:.1f} {y + 4:.1f} L {x - 4.5:.1f} {y + 4:.1f} Z" fill="#dc2626"/>')
+    for lb in data["labels"]:
+        x, y = xy((lb["x"], lb["y"]))
+        out.append(f'<text x="{x:.1f}" y="{y:.1f}" text-anchor="middle" {font} font-size="12" fill="#444444">{lb["text"]}</text>')
+    for name, p, dx in (("Main entrance (courtyard side)", ENTRANCE_WEST, -8), ("South-east entrance", ENTRANCE_SOUTH_EAST, 8)):
+        x, y = xy(p)
+        anchor = "end" if dx < 0 else "start"
+        out.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="4" fill="#ffffff" stroke="#111111" stroke-width="2"/>')
+        out.append(f'<text x="{x + dx:.1f}" y="{y + 4:.1f}" text-anchor="{anchor}" {font} font-size="11" fill="#111111">{name}</text>')
+    x, y = xy(data["start"])
+    out.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="8" fill="#059669"/>')
+    out.append(f'<text x="{x - 12:.1f}" y="{y + 4:.1f}" text-anchor="end" {font} font-size="12" font-weight="700" fill="#059669">START (café)</text>')
+    h = data["helicopter"]
+    x, y = xy((h["x"], h["y"]))
+    out.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{h["radius_m"] * scale:.1f}" fill="#facc15" fill-opacity="0.25" stroke="#ca8a04" stroke-dasharray="4 3"/>')
+    out.append(f'<rect x="{x - 9:.1f}" y="{y - 9:.1f}" width="18" height="18" rx="4" fill="#facc15" stroke="#111111"/>')
+    out.append(f'<text x="{x:.1f}" y="{y + 4.5:.1f}" text-anchor="middle" {font} font-size="13" font-weight="800">H</text>')
+    out.append(f'<text x="{x + 14:.1f}" y="{y - 12:.1f}" {font} font-size="12" font-weight="700" fill="#854d0e">HELICOPTER (tape the QR sign here)</text>')
+    # legend, scale bar, north arrow
+    ly = height - 74
+    out.append(f'<path d="M 20 {ly - 5} L 24.5 {ly + 4} L 15.5 {ly + 4} Z" fill="#dc2626"/><text x="32" y="{ly + 4}" {font} font-size="11">zombie spawn point</text>')
+    out.append(f'<line x1="14" y1="{ly + 18}" x2="27" y2="{ly + 18}" stroke="#2563eb" stroke-width="1.5" stroke-dasharray="5 4"/><text x="32" y="{ly + 22}" {font} font-size="11">route zombies follow</text>')
+    out.append(f'<line x1="14" y1="{ly + 36}" x2="27" y2="{ly + 36}" stroke="#111111" stroke-width="2.5"/><text x="32" y="{ly + 40}" {font} font-size="11">wall (zombies cannot pass)</text>')
+    out.append(f'<line x1="16" y1="{ly + 58}" x2="{16 + 10 * scale:.0f}" y2="{ly + 58}" stroke="#111111" stroke-width="2"/><text x="{22 + 10 * scale:.0f}" y="{ly + 62}" {font} font-size="11">10 m</text>')
+    out.append(f'<path d="M {width - 30:.0f} 78 l 7 20 l -7 -5 l -7 5 Z" fill="#111111"/><text x="{width - 30:.0f}" y="72" text-anchor="middle" {font} font-size="12" font-weight="700">N</text>')
+    out.append("</svg>")
+    return "\n".join(out) + "\n"
+
+
 if __name__ == "__main__":
     data = build()
     OUT.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+    PLAN.write_text(render_plan(data))
     h = data["helicopter"]
     print(f"wrote {OUT.name}: {len(data['walls'])} walls, {len(data['graph']['nodes'])} corridor nodes, "
           f"{len(data['spawn_points'])} spawn points")
