@@ -231,6 +231,55 @@ def test_everyone_down_is_a_wipe():
     assert r.ended is ended
 
 
+# ------------------------------------------------------------------ endless mode
+
+def test_only_the_host_picks_the_mode_and_only_in_the_lobby():
+    r, a, b = make_room()
+    assert r.settings.mode == "mission" and r.lobby_state()["settings"]["mode"] == "mission"
+    with pytest.raises(GameError):
+        r.set_mode(b.id, "endless")
+    with pytest.raises(GameError):
+        r.set_mode(a.id, "sandbox")
+    r.set_mode(a.id, "endless")
+    assert r.lobby_state()["settings"]["mode"] == "endless"
+    started = r.start(a.id, T0)
+    assert started["mode"] == "endless" and started["mission"]["phase"] == "endless" and started["at"] == T0
+    with pytest.raises(GameError):
+        r.set_mode(a.id, "mission")                     # locked for the run
+    r.reset(a.id)
+    assert r.settings.mode == "endless"                 # and kept for the next one
+
+
+def test_endless_ignores_the_helicopter_and_ends_only_in_a_wipe():
+    r, a = make_room(names=("Ada",))
+    r.set_mode(a.id, "endless")
+    r.start(a.id, T0)
+    heli = r.map.helicopter
+    place(r, a, heli.x, heli.y)                         # standing right on the pad
+    t, ev = run(r, 3, T0)
+    assert r.mission.phase == "endless" and "phase" not in kinds(ev)
+    assert r.arrived(a.id, t) == [] and r.mission.phase == "endless"     # "we're here" means nothing here
+    r.set_extract(a.id, True)
+    t, ev = run(r, 2, t)
+    assert r.mission.extract_progress == 0.0 and r.phase == "playing"
+
+    r.world.spawn(WALKER, heli.x, heli.y + 1.0)
+    t, ev = run(r, 12, t)
+    ended = ev[-1]
+    assert ended["t"] == "ended" and ended["outcome"] == "wiped" and ended["mode"] == "endless"
+
+
+def test_endless_waves_come_at_the_squad_wherever_it_stands():
+    r, a = make_room(names=("Ada",), grace_s=1, spawn_gap_s=0.05)
+    r.set_mode(a.id, "endless")
+    r.start(a.id, T0)
+    place(r, a, 40, -25)                                # nowhere near the start or the helicopter
+    t, ev = run(r, 2, T0)
+    assert r.mission.wave == 1 and r.world.zombies
+    for z in r.world.zombies.values():
+        assert 5 < math.hypot(z.x - 40, z.y + 25) < 25  # around the player, not on top of them
+
+
 def test_waves_reach_the_squad_on_their_own():
     r, a = make_room(names=("Ada",), grace_s=1, spawn_gap_s=0.2)
     r.start(a.id, T0)

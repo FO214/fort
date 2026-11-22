@@ -33,6 +33,7 @@ docs/      the build spec
 | 6 | Variety and feel | part done: four gun classes (as plain stat tables: no shotgun cone or rifle pierce yet), sound and haptic cues, keep-awake. The phone can draw walkers, runners, brutes and a boss; the server still only spawns walkers |
 | 7 | Real zombie art | not started: the four types are drawn in code, behind the one component to swap |
 | UI | BLACKSITE design system | done: every screen, the HUD and all overlays → `mobile/README.md` |
+| Modes | Mission and Endless | done: the host picks in the lobby. Endless has no helicopter: waves keep coming around the squad, each tougher than the last, until nobody is standing → `backend/README.md` |
 
 ## The building map
 
@@ -81,6 +82,10 @@ cd mobile && npm run typecheck && npm run e2e
 
 These go beyond the spec, or settle something it left open.
 
+- **Endless mode ends only in a wipe.** There is no helicopter, so nothing to
+  reach or extract on; the host's abort still returns everyone to the lobby.
+  Each wave is bigger and its zombies 6% tougher than the last, so a run
+  always ends. Each phone remembers the furthest wave it has reached.
 - **Four gun classes: pistol, SMG, shotgun, rifle.** The lobby's class cards
   come straight from the server's table. Pistol, SMG and rifle carry the
   numbers the original regular, light and heavy classes had; the shotgun is

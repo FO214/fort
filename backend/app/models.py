@@ -47,9 +47,17 @@ def default_map() -> str:
     return os.environ.get("LOONIE_DEFAULT_MAP", "arena")
 
 
+# The two ways to play.
+#   mission  walk to the helicopter, hold it, extract
+#   endless  no helicopter and no way out: waves keep coming, each a little
+#            tougher than the last, until nobody is standing
+Mode = Literal["mission", "endless"]
+
+
 class Settings(BaseModel):
     max_players: int = Field(4, ge=1, le=4)
     map: str = Field(default_factory=default_map, pattern=r"^[a-z0-9_-]{1,32}$")
+    mode: Mode = "mission"
 
 
 # ----------------------------------------------------------- phone -> server
@@ -87,6 +95,12 @@ class SetMap(BaseModel):
     """Host only, in the lobby: which map the mission is played on."""
     t: Literal["set_map"]
     map: str = Field(pattern=r"^[a-z0-9_-]{1,32}$")
+
+
+class SetMode(BaseModel):
+    """Host only, in the lobby: mission or endless."""
+    t: Literal["set_mode"]
+    mode: Mode
 
 
 class Start(BaseModel):

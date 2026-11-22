@@ -98,6 +98,8 @@ export function MatchScreen() {
 
   const alive = me?.st === 'alive';
   const final = s.mission.phase === 'final';
+  // Endless: no helicopter, no arrival, no extraction. Only the waves and the clock.
+  const endless = s.mission.phase === 'endless';
   const heliQr = s.map?.helicopter.qr ?? '';
 
   // Clock for the HUD (reload sweep, feed expiry, QR freshness). The AR layer has its own.
@@ -302,7 +304,7 @@ export function MatchScreen() {
               <HudIconButton icon="menu" label="Mission menu" onPress={() => setMenu(true)} testID="hud-menu" />
             </View>
             {showMinimap ? (
-              <Minimap map={s.map} me={pose} myId={myId} squad={s.squad} zombies={zombies.latest()} identityOf={idOf} size={mapSize}
+              <Minimap map={s.map} me={pose} myId={myId} squad={s.squad} zombies={zombies.latest()} identityOf={idOf} size={mapSize} showHeli={!endless}
                 onOpen={plan ? () => setShowMap(true) : undefined} />
             ) : null}
           </View>
@@ -310,7 +312,8 @@ export function MatchScreen() {
           {/* Centred on the screen, whatever the corners are doing. */}
           <View style={[styles.topCentre, corner('top')]} pointerEvents="box-none">
             <View style={{ maxWidth: centreMax, alignItems: 'center', gap: space[1] }} pointerEvents="box-none">
-              <ObjectiveBanner mission={s.mission} extract={s.extract} me={pose} heli={s.map?.helicopter} maxWidth={centreMax}>
+              <ObjectiveBanner mission={s.mission} extract={s.extract} me={pose} heli={s.map?.helicopter} maxWidth={centreMax}
+                elapsed={s.startedAt ? Math.max(0, now - s.startedAt) : null}>
                 {canArrive && heliDist <= ARRIVAL_PROMPT_M ? (
                   // GPS can refuse to admit the squad has arrived; the host can say so.
                   // Always in the mission menu; offered here once they are close.
@@ -360,7 +363,7 @@ export function MatchScreen() {
 
       {showMap && plan ? (
         <FullMapOverlay map={plan} me={pose} myId={myId} squad={s.squad} zombies={zombies.latest()} identityOf={idOf} nameOf={nameOf}
-          onClose={() => setShowMap(false)} />
+          onClose={() => setShowMap(false)} showHeli={!endless} />
       ) : null}
 
       <ConnectionOverlay onLeave={leave} />

@@ -2,7 +2,7 @@ import React, { useEffect } from 'react';
 import { StyleSheet, View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { FormationMark } from '../brand/Brand';
-import { extractionLine } from '../game/format';
+import { clock, extractionLine } from '../game/format';
 import { angleDiffDeg, bearingXY, distXY } from '../game/geo';
 import type { MissionState } from '../net/types';
 import { useStore, type Banner } from '../store';
@@ -24,12 +24,16 @@ const TIGHT_BELOW = 262;
  *   holdout  → hold the zone: which wave of the hold this is
  *   final    → extract now: the squad's shared progress and how many are
  *              holding, so defenders can see it is not their own action
+ *   endless  → survive: there is nowhere to go, so it shows how long the
+ *              squad has lasted (the wave is top-right, as always)
  */
-export function ObjectiveBanner({ mission, extract, me, heli, maxWidth, children }: {
+export function ObjectiveBanner({ mission, extract, me, heli, elapsed, maxWidth, children }: {
   mission: MissionState;
   extract: { progress: number; need: number; holders: string[] };
   me: { x: number; y: number; heading: number | null };
   heli: { x: number; y: number } | null | undefined;
+  /** Seconds since the run began, if the server said when that was. Endless shows it. */
+  elapsed?: number | null;
   /** The room there is between the corners. Short on it, the wording shortens; the type does not. */
   maxWidth: number;
   /** A control that belongs to the objective (the host's "We're here"). */
@@ -52,6 +56,14 @@ export function ObjectiveBanner({ mission, extract, me, heli, maxWidth, children
           </View>
         ) : null}
         <T v="hudValue" testID="heli-dist">{dist == null ? '–' : `${Math.round(dist)} m`}</T>
+      </View>
+    );
+  } else if (mission.phase === 'endless') {
+    title = 'Survive';
+    body = (
+      <View style={styles.line} accessibilityLabel={elapsed != null ? `Survived ${clock(elapsed)}` : undefined}>
+        <Icon name="timeout" size={20} color={colors.status.objective} weight={2.2} />
+        <T v="hudValue" testID="endless-time">{elapsed != null ? clock(elapsed) : '–'}</T>
       </View>
     );
   } else if (mission.phase === 'holdout') {

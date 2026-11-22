@@ -35,6 +35,8 @@ interface Props {
   mode: 'mini' | 'full';
   /** Mini only: metres from you to the edge of the window. */
   rangeM?: number;
+  /** False in endless mode, where there is no helicopter to walk to. */
+  showHeli?: boolean;
 }
 
 /** Does this map have anything to draw beyond dots? The open arena does not. */
@@ -106,7 +108,7 @@ const styles = StyleSheet.create({
   name: { backgroundColor: colors.camera.backingStrong, paddingHorizontal: 5, overflow: 'hidden' },
 });
 
-export function MapView({ map, me, myId, squad, zombies, identityOf, nameOf, width, height, mode, rangeM = 22 }: Props) {
+export function MapView({ map, me, myId, squad, zombies, identityOf, nameOf, width, height, mode, rangeM = 22, showHeli = true }: Props) {
   const heading = me.heading ?? 0;
   const mini = mode === 'mini';
 
@@ -147,7 +149,7 @@ export function MapView({ map, me, myId, squad, zombies, identityOf, nameOf, wid
             const [x1, y1] = to(w[0], w[1]), [x2, y2] = to(w[2], w[3]);
             return <Line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke={alpha(colors.textPrimary, 0.82)} strokeWidth={mini ? 1.5 : 2} strokeLinecap="square" />;
           })}
-          <HeliMark x={hx} y={hy} scale={mini ? 0.95 : 1.5} />
+          {showHeli ? <HeliMark x={hx} y={hy} scale={mini ? 0.95 : 1.5} /> : null}
           {zombies.map((z) => {
             const [zx, zy] = to(z[2], z[3]);
             return <ZombieMark key={`z${z[0]}`} x={zx} y={zy} type={z[1]} scale={k} />;

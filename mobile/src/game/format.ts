@@ -28,3 +28,9 @@ export function extractionLine(holding: number, need: number, progress: number):
   if (holding === 0) return progress > 0 ? `Paused. ${tally}.` : `${tally}. Aim at the helicopter code and hold.`;
   return `${progress > 0 ? 'Paused. ' : ''}${tally}. Need ${count(need - holding)} more.`;
 }
+
+/** The two modes, as the lobby, the HUD and the results name and explain them. */
+export const MODES = {
+  mission: { name: 'Mission', line: 'Reach the helicopter, hold it for two waves, then extract together.' },
+  endless: { name: 'Endless', line: 'No helicopter and no way out. Waves keep coming, each one tougher, until nobody is standing.' },
+} as const;

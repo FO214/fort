@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ZombieBuffer } from './game/zombies';
-import type { EndedMsg, GunClass, LobbyPlayer, MapChoice, MapInfo, MissionState, PlayerSnap, RoomPhase, ServerMsg, Settings } from './net/types';
+import type { EndedMsg, GameMode, GunClass, LobbyPlayer, MapChoice, MapInfo, MissionState, PlayerSnap, RoomPhase, ServerMsg, Settings } from './net/types';
 
 export type AppPhase = 'menu' | 'join' | 'lobby' | 'playing' | 'summary';
 export type Connection = 'idle' | 'connecting' | 'open' | 'reconnecting' | 'closed';
@@ -18,7 +18,11 @@ export interface Banner { key: string; at: number; title: string; detail?: strin
  *   lost      a paired gun dropped off the network
  */
 export type GunLink = 'none' | 'pairing' | 'paired' | 'timeout' | 'lost';
-export interface Prefs { haptics: boolean; sound: boolean; hudScale: number }
+export interface Prefs {
+  haptics: boolean; sound: boolean; hudScale: number;
+  /** The furthest wave this phone has reached in endless mode. */
+  bestEndlessWave: number;
+}
 export const HUD_SCALES = [0.9, 1, 1.12] as const;
 /** The server's pairing window (backend/app/devices.py, PAIR_WINDOW_S). */
 export const PAIR_WINDOW_S = 10;
@@ -54,6 +58,12 @@ interface State {
   /** Bumped by every `started`, so the tracker knows to re-anchor the map. */
   missionSeq: number;
   mission: MissionState;
+  /** Which way this run is played. The lobby's choice until a run starts, then the run's own. */
+  mode: GameMode;
+  /** Server time the run began, 0 if the server did not say. */
+  startedAt: number;
+  /** The endless record before this run's result came in, so the results can say "new best". */
+  previousBest: number;
   /** Hold-to-extract during the final wave. */
   extract: { progress: number; need: number; holders: string[] };
   squad: PlayerSnap[];
@@ -108,7 +118,7 @@ interface State {
 /** `?profile=name` keeps a second simulated phone in the same browser from sharing this one's saved session. */
 const PROFILE = typeof window !== 'undefined' && !!window.location?.search ? new URLSearchParams(window.location.search).get('profile') : null;
 const KEY = PROFILE ? `loonie.prefs.v2:${PROFILE}` : 'loonie.prefs.v2';
-const DEFAULT_PREFS: Prefs = { haptics: true, sound: true, hudScale: 1 };
+const DEFAULT_PREFS: Prefs = { haptics: true, sound: true, hudScale: 1, bestEndlessWave: 0 };
 /** Tests and the walkthrough can skip the deploy sequence with `?deploy=skip`. */
 const SKIP_DEPLOY = typeof window !== 'undefined' && !!window.location?.search
   && new URLSearchParams(window.location.search).get('deploy') === 'skip';
@@ -158,6 +168,9 @@ export const useStore = create<State>((set, get) => ({
   serverOffset: 0,
   missionSeq: 0,
   mission: NO_MISSION,
+  mode: 'mission',
+  startedAt: 0,
+  previousBest: 0,
   extract: NO_EXTRACT,
   squad: [],
   zombieCount: 0,
@@ -217,6 +230,7 @@ export const useStore = create<State>((set, get) => ({
       }
       case 'lobby': {
         const next: Partial<State> = { hostId: m.host_id, settings: m.settings, roster: m.players, roomPhase: m.phase };
+        if (m.phase === 'lobby') next.mode = m.settings.mode ?? 'mission';
         // The host left and the server passed the mission on: tell everyone who has it now.
         if (s.hostId && m.host_id !== s.hostId) {
           const mine = m.host_id === myId;
@@ -240,11 +254,14 @@ export const useStore = create<State>((set, get) => ({
         const cls = me ? s.classes[me.cls] : undefined;
         const fresh = s.phase !== 'playing';       // a reconnect re-sends `started` mid-mission
         if (fresh) zombies.clear();
+        const mode: GameMode = m.mode ?? (m.mission.phase === 'endless' ? 'endless' : 'mission');
         set({
           phase: 'playing', roomPhase: 'playing', map: m.map, mission: m.mission, serverOffset: m.now - now,
-          missionSeq: s.missionSeq + 1, ended: null,
+          missionSeq: s.missionSeq + 1, ended: null, mode, startedAt: m.at ?? m.now,
           ...(fresh ? {
-            ammo: cls?.magazine ?? 0, reloadingUntil: 0, shots: [], damages: [], feed: [], banner: null, squad: [], zombieCount: 0, extract: NO_EXTRACT,
+            ammo: cls?.magazine ?? 0, reloadingUntil: 0, shots: [], damages: [], feed: [], squad: [], zombieCount: 0, extract: NO_EXTRACT,
+            // The run's opening line, shown as the HUD comes up.
+            banner: mode === 'endless' ? bannerOf('Endless', 'objective', 'Hold out as long as you can') : bannerOf('Reach the helicopter', 'objective', 'Stay together'),
             // Only a start seen from the lobby needs the phone turned and mounted.
             deployed: SKIP_DEPLOY || s.phase !== 'lobby',
           } : {}),
@@ -323,10 +340,18 @@ export const useStore = create<State>((set, get) => ({
       case 'reloaded':
         if (m.player_id === myId) set({ ammo: m.ammo, reloadingUntil: 0 });
         return;
-      case 'ended':
+      case 'ended': {
         zombies.clear();
-        set({ phase: 'summary', roomPhase: 'ended', ended: m });
+        // Endless keeps a record on this phone: the furthest wave reached.
+        const endless = (m.mode ?? s.mode) === 'endless';
+        const best = s.prefs.bestEndlessWave;
+        set({
+          phase: 'summary', roomPhase: 'ended', ended: m, previousBest: best,
+          ...(endless && m.wave > best ? { prefs: { ...s.prefs, bestEndlessWave: m.wave } } : {}),
+        });
+        if (endless && m.wave > best) persist(get);
         return;
+      }
       case 'error':
         set({ error: m.msg });
         return;
@@ -340,6 +365,7 @@ export const useStore = create<State>((set, get) => ({
     set({
       phase: 'menu', session: null, hostId: null, roster: [], settings: null, roomPhase: 'lobby',
       ended: null, feed: [], banner: null, shots: [], damages: [], squad: [], mission: NO_MISSION, extract: NO_EXTRACT, zombieCount: 0,
+      mode: 'mission', startedAt: 0,
       error: null, connection: 'idle', lostAt: 0, gun: 'none', deployed: true, hostNote: null,
     });
     persist(get, null);

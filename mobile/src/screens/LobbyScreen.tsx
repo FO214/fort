@@ -3,6 +3,7 @@ import { ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native'
 import * as Clipboard from 'expo-clipboard';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { FormationMark } from '../brand/Brand';
+import { MODES } from '../game/format';
 import { identityForSlot, identityOf } from '../game/identity';
 import { permissionsReady, usePermissions } from '../game/permissions';
 import { tracking, useTracking } from '../game/tracking';
@@ -91,27 +92,44 @@ export function LobbyScreen() {
         </View>
       </View>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space[2] }}>
+        <StatusChip icon={s.mode === 'endless' ? 'wave' : 'helicopter'} label={MODES[s.mode].name} tone="objective" testID="mode-chip" />
         <StatusChip icon={gps.icon} label={gps.label} tone={gps.tone} busy={gps.busy} testID="gps" />
         {online ? <StatusChip icon="online" label="Online" tone="ok" testID="connection" /> : <ConnectionBanner />}
       </View>
     </View>
   );
 
+  // How the run is played. Everyone sees it; the host chooses it.
+  const mode = (
+    <View style={{ gap: space[2] }} testID="mode-row">
+      <T v="overline" c={colors.textSecondary}>Mode</T>
+      {isHost ? (
+        <Segmented testID="mode" value={s.mode} onChange={(m) => net.setMode(m)}
+          options={[{ value: 'mission' as const, label: MODES.mission.name }, { value: 'endless' as const, label: MODES.endless.name }]} />
+      ) : null}
+      <T v="label" c={colors.textSecondary} testID="mode-line">
+        {isHost ? '' : `${MODES[s.mode].name}. `}{MODES[s.mode].line}
+      </T>
+    </View>
+  );
+
   const roster = (
     <View testID="roster">
       <Divider />
-      {Array.from({ length: capacity }).map((_, i) => {
-        const p = s.roster[i];
-        return (
-          <React.Fragment key={p?.id ?? `open-${i}`}>
-            {p ? (
-              <RosterRow name={p.name} identity={identityOf(p.id, s.roster)} className={s.classes[p.cls]?.name ?? p.cls}
-                ready={p.ready} connected={p.connected} host={p.id === s.hostId} me={p.id === myId} gun={p.id === myId ? s.gun : undefined} />
-            ) : <OpenSlot identity={identityForSlot(i)} />}
-            <Divider />
-          </React.Fragment>
-        );
-      })}
+      {s.roster.slice(0, capacity).map((p) => (
+        <React.Fragment key={p.id}>
+          <RosterRow name={p.name} identity={identityOf(p.id, s.roster)} className={s.classes[p.cls]?.name ?? p.cls}
+            ready={p.ready} connected={p.connected} host={p.id === s.hostId} me={p.id === myId} gun={p.id === myId ? s.gun : undefined} />
+          <Divider />
+        </React.Fragment>
+      ))}
+      {/* One line for the places nobody has taken, however many there are. */}
+      {s.roster.length < capacity ? (
+        <>
+          <OpenSlot identity={identityForSlot(s.roster.length)} count={capacity - s.roster.length} />
+          <Divider />
+        </>
+      ) : null}
     </View>
   );
 
@@ -159,7 +177,7 @@ export function LobbyScreen() {
       {isHost ? (
         <View style={{ flexDirection: 'row', gap: space[3] }}>
           {ready}
-          <Button label="Start mission" variant="primary" disabled={!!blocker} onPress={start} testID="start" fill />
+          <Button label={s.mode === 'endless' ? 'Start endless' : 'Start mission'} variant="primary" disabled={!!blocker} onPress={start} testID="start" fill />
         </View>
       ) : ready}
       <T v="label" c={colors.textSecondary} center testID="start-why">
@@ -179,11 +197,11 @@ export function LobbyScreen() {
           <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: space[4], gap: space[4] }} showsVerticalScrollIndicator={false}>
             {wide ? (
               <View style={{ flexDirection: 'row', gap: space[8], alignItems: 'flex-start' }}>
-                <View style={{ flex: 1, gap: space[4] }}>{header}{roster}</View>
+                <View style={{ flex: 1, gap: space[4] }}>{header}{mode}{roster}</View>
                 <View style={{ flex: 1, gap: space[5] }}>{loadout}{gun}{map}</View>
               </View>
             ) : (
-              <>{header}{roster}{loadout}{gun}{map}</>
+              <>{header}{mode}{roster}{loadout}{gun}{map}</>
             )}
           </ScrollView>
           {footer}

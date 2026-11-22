@@ -4,7 +4,7 @@ import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanima
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { FormationMark } from '../brand/Brand';
 import { feedback } from '../game/feedback';
-import { clock } from '../game/format';
+import { MODES, clock } from '../game/format';
 import { identityOf } from '../game/identity';
 import { net } from '../net/client';
 import { ConnectionBanner } from '../overlays/ConnectionOverlay';
@@ -33,6 +33,10 @@ export function ResultsScreen() {
   const e = s.ended;
   const results = e?.results ?? [];
   const won = e?.outcome === 'extracted';
+  // Endless can only end one way, so what matters is how far the squad got.
+  const endless = (e?.mode ?? s.mode) === 'endless';
+  const wave = e?.wave ?? 0;
+  const newBest = endless && wave > s.previousBest;
   // The outcome's own cue, once, when the screen arrives.
   useEffect(() => { if (e) feedback(won ? 'win' : 'loss'); }, [e, won]);
   // The outcome arrives: one short rise, or none at all with reduced motion.
@@ -52,11 +56,16 @@ export function ResultsScreen() {
         adjustsFontSizeToFit numberOfLines={1}>
         {won ? 'Extracted' : 'Squad wiped'}
       </T>
-      <T v="body" c={colors.textSecondary} center>
-        {won ? 'Everyone still standing made it onto the helicopter.' : 'Nobody was left standing.'}
+      <T v="body" c={colors.textSecondary} center testID="outcome-line">
+        {endless ? `You reached wave ${wave} and lasted ${clock(e?.duration_s ?? 0)}.`
+          : won ? 'Everyone still standing made it onto the helicopter.' : 'Nobody was left standing.'}
       </T>
+      {endless ? (
+        <StatusChip icon="wave" tone={newBest ? 'objective' : 'neutral'} style={{ alignSelf: 'center' }} testID="endless-best"
+          label={newBest ? `New best on this phone: wave ${wave}` : `Best on this phone: wave ${Math.max(s.prefs.bestEndlessWave, wave)}`} />
+      ) : null}
       <T v="technical" c={colors.textMuted} center testID="mission-id">
-        MISSION {s.session?.code ?? '····'} · {(s.map?.name ?? '').toUpperCase()}
+        {MODES[endless ? 'endless' : 'mission'].name.toUpperCase()} {s.session?.code ?? '····'} · {(s.map?.name ?? '').toUpperCase()}
       </T>
     </Animated.View>
   );
@@ -67,7 +76,7 @@ export function ResultsScreen() {
       <StatLine label="Kills" value={String(e?.kills ?? 0)} testID="sum-kills" />
       <StatLine label="Revives" value={String(sum((r) => r.revives))} testID="sum-revives" />
       <StatLine label="Times knocked" value={String(sum((r) => r.knocks))} testID="sum-knocks" />
-      <StatLine label="Waves" value={String(e?.wave ?? 0)} testID="sum-wave" />
+      <StatLine label={endless ? 'Wave reached' : 'Waves'} value={String(wave)} testID="sum-wave" />
       <StatLine label="Time" value={clock(e?.duration_s ?? 0)} testID="sum-time" last />
     </View>
   );

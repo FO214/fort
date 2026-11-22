@@ -18,16 +18,18 @@ const RADAR_RANGE_M = 30;
  * whole floor. On the open arena there is no plan, so it is a range ring:
  * anything further than the ring is pinned to its rim and faded.
  */
-export function Minimap({ map, me, myId, squad, zombies, identityOf, size, onOpen }: {
+export function Minimap({ map, me, myId, squad, zombies, identityOf, size, onOpen, showHeli = true }: {
   map: MapInfo | null; me: MapPose; myId: string | undefined; squad: PlayerSnap[]; zombies: ZombieRow[];
   identityOf: (id: string) => Identity; size: number; onOpen?: () => void;
+  /** False in endless mode: no helicopter to mark. */
+  showHeli?: boolean;
 }) {
   const plan = map && hasFloorPlan(map) ? map : null;
   const body = (
     <HudPanel material="glass" contentStyle={{ width: size, height: size }}>
       {plan
-        ? <MapView map={plan} me={me} myId={myId} squad={squad} zombies={zombies} identityOf={identityOf} width={size} height={size} mode="mini" />
-        : <Radar me={me} myId={myId} squad={squad} zombies={zombies} heli={map?.helicopter} identityOf={identityOf} size={size} />}
+        ? <MapView map={plan} me={me} myId={myId} squad={squad} zombies={zombies} identityOf={identityOf} width={size} height={size} mode="mini" showHeli={showHeli} />
+        : <Radar me={me} myId={myId} squad={squad} zombies={zombies} heli={showHeli ? map?.helicopter : null} identityOf={identityOf} size={size} />}
     </HudPanel>
   );
   if (!plan || !onOpen) return body;

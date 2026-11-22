@@ -22,7 +22,8 @@ middle of the screen is the gun sight.
    `ws://<laptop-ip>:8000/ws`. It's remembered.
 4. One phone **creates** a mission; the others **join** with the
    four-character code. Pick a class, pair a gun if you have one, ready up.
-   The host starts once everyone is ready.
+   The host picks the **mode** (Mission, or Endless: no helicopter, waves
+   until nobody is standing) and the map, and starts once everyone is ready.
 5. Each phone then walks through **deploy**: turn it sideways, mount it on
    the blaster, wait for a position, count in.
 

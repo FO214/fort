@@ -408,6 +408,69 @@ test('a real building: host picks the map, zombies keep to the floor plan, the m
   for (const p of [ada, bo]) await p.ctx.close();
 });
 
+test('endless mode: the host picks it, waves keep coming with no helicopter, and it ends when nobody is standing', async ({ browser }) => {
+  test.setTimeout(180_000);
+  const ada = await phone(browser, 'Ada');
+  const code = await createSquad(ada);
+  const bo = await phone(browser, 'Bo');
+  await joinSquad(bo, code);
+
+  // The mission is the default. Only the host can change it, and everyone sees the choice.
+  await expect(bo.page.getByTestId('mode-chip')).toContainText('Mission');
+  await expect(bo.page.getByTestId('mode-endless')).toHaveCount(0);
+  await ada.page.getByTestId('mode-endless').click();
+  await expect(ada.page.getByTestId('mode-endless')).toHaveAttribute('aria-checked', 'true');
+  await expect(bo.page.getByTestId('mode-chip')).toContainText('Endless');
+  await expect(bo.page.getByTestId('mode-line')).toContainText('No helicopter');
+  await shot(ada.page, '25-lobby-endless');
+  await shot(bo.page, '25-lobby-endless-guest');
+
+  await startMission([ada, bo]);
+  for (const p of [ada, bo]) await intoMission(p);
+  await place(ada.page, 0, 0);
+  await place(bo.page, 3, 0);
+
+  // The objective is to survive: a clock, and no helicopter anywhere.
+  await expect(ada.page.getByTestId('objective')).toContainText('Survive');
+  await expect(ada.page.getByTestId('endless-time')).toHaveText(/^\d+:\d\d$/);
+  await expect(ada.page.getByTestId('heli-dist')).toHaveCount(0);
+  await expect(ada.page.getByTestId('arrived')).toHaveCount(0);
+  await ada.page.getByTestId('hud-menu').click();
+  await expect(ada.page.getByTestId('arrived-menu')).toHaveCount(0);
+  await ada.page.getByTestId('sheet-close').click();
+  // Standing where the helicopter would be changes nothing.
+  await place(ada.page, 0, 30);
+  await ada.page.waitForTimeout(700);
+  await expect(ada.page.getByTestId('objective')).toContainText('Survive');
+  await place(ada.page, 0, 0);
+
+  // Wave after wave: clear one and the next arrives, with no end to them.
+  await expect.poll(() => hud.wave(ada.page), { timeout: 20_000 }).toBe(1);
+  await shot(ada.page, '26-endless-hud');
+  const wave3 = async () => (await hud.wave(ada.page)) >= 3;
+  await Promise.all([
+    fightUntil(ada.page, wave3, { timeoutMs: 90_000 }),
+    fightUntil(bo.page, wave3, { everyMs: 400, timeoutMs: 90_000 }),
+  ]);
+  for (const p of [ada, bo]) await expect(p.page.getByTestId('objective')).toContainText('Survive');
+  expect(await hud.wave(bo.page)).toBeGreaterThanOrEqual(3);
+  await shot(ada.page, '26-endless-wave-3');
+
+  // They stop fighting. The only way an endless run ends.
+  for (const p of [ada, bo]) await expect(p.page.getByTestId('outcome')).toContainText('Squad wiped', { timeout: 90_000 });
+  await expect(ada.page.getByTestId('outcome-line')).toContainText(/You reached wave \d+ and lasted \d+:\d\d/);
+  await expect(ada.page.getByTestId('mission-id')).toContainText('ENDLESS');
+  await expect(ada.page.getByTestId('endless-best')).toContainText('New best on this phone: wave');
+  expect(parseInt((await ada.page.getByTestId('sum-wave').textContent()) ?? '0', 10)).toBeGreaterThanOrEqual(3);
+  await ada.page.setViewportSize(PORTRAIT);
+  await shot(ada.page, '27-endless-results');
+
+  // Play again keeps the mode.
+  await ada.page.getByTestId('again').click();
+  for (const p of [ada, bo]) await expect(p.page.getByTestId('mode-chip')).toContainText('Endless');
+  for (const p of [ada, bo]) await p.ctx.close();
+});
+
 test('a phone that reloads the page mid-mission drops back into it', async ({ browser }) => {
   const ada = await phone(browser, 'Ada');
   await createSquad(ada);

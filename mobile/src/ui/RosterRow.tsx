@@ -49,16 +49,17 @@ export function RosterRow({ name, identity, className, ready, connected, host, m
   );
 }
 
-/** A place in the squad nobody has taken yet. */
-export function OpenSlot({ identity }: { identity: Identity }) {
+/** The places in the squad nobody has taken yet, as one line. */
+export function OpenSlot({ identity, count = 1 }: { identity: Identity; count?: number }) {
   return (
-    <View style={[styles.row, { opacity: 0.55 }]}>
+    <View style={[styles.row, styles.open]} testID="open-slots">
       <PlayerMarker identity={{ ...identity, color: colors.border }} size={30} numbered={false} />
-      <T v="label" c={colors.textMuted} style={{ flex: 1 }}>Open slot</T>
+      <T v="label" c={colors.textMuted} style={{ flex: 1 }}>{count === 1 ? '1 open slot' : `${count} open slots`}</T>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: space[3], minHeight: 54, paddingVertical: space[1] + 2 },
+  open: { minHeight: 44, opacity: 0.6 },
 });

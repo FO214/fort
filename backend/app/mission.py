@@ -46,6 +46,8 @@ class Tuning:
     revive_range_m: float = 4.0      # ...from this close (plus GPS slack)
     revive_slack_cap_m: float = 25.0 # the two phones' GPS accuracies are added to the range, up to this
     revive_clear_m: float = 4.0      # no zombie may be this close to the knocked player
+    # endless mode
+    endless_hp_growth: float = 0.06  # each endless wave's zombies have this much more health than the last
 
     @classmethod
     def from_env(cls) -> "Tuning":
@@ -71,16 +73,22 @@ class Mission:
     (survive a fixed number of waves there) → `final` (an endless last wave
     while the squad holds to extract) → `extracted`. The room ends the run
     as `wiped` if nobody is left standing.
+
+    In endless mode there is one phase, `endless`, and it never changes:
+    there is nowhere to go and nothing to extract on. Waves arrive around
+    the squad wherever it stands, one after another, each bigger and a
+    little tougher than the last, until the room ends the run as `wiped`.
     """
 
     def __init__(self, world: World, game_map: MapData, tuning: Tuning, players: int,
-                 now: float, rng: Optional[random.Random] = None) -> None:
+                 now: float, rng: Optional[random.Random] = None, mode: str = "mission") -> None:
         self.world = world
         self.map = game_map
         self.t = tuning
         self.rng = rng or random.Random()
         self.players = max(1, players)
-        self.phase = "journey"
+        self.mode = mode
+        self.phase = "endless" if mode == "endless" else "journey"
         self.started_at = now
         self.wave = 0                       # number of the wave in progress, 0 before the first
         self.wave_total = 0                 # zombies that wave started with
@@ -114,11 +122,13 @@ class Mission:
         if self.to_spawn > 0 and now >= self.next_spawn_at and len(self.world.zombies) < self.t.max_zombies:
             anchor = pick_anchor() if pick_anchor else None
             x, y = self.map.spawn_position(self.rng, living, anchor)
-            self.world.spawn(WALKER, x, y, self.t.zombie_hp)
+            self.world.spawn(WALKER, x, y, self.zombie_hp_scale())
             self.to_spawn -= 1
             self.next_spawn_at = now + self.t.spawn_gap_s
 
-        if self.phase == "journey":
+        if self.phase in ("journey", "endless"):
+            # Wave after wave, with a breather once each is cleared. Ignoring a
+            # wave does not hold the next one back for ever.
             cleared = self.wave > 0 and self.remaining == 0
             if cleared and self.next_wave_at is None:
                 self.next_wave_at = now + self.t.rest_s
@@ -148,6 +158,13 @@ class Mission:
             if self.remaining < floor:
                 self.to_spawn += floor - self.remaining
         return events
+
+    def zombie_hp_scale(self) -> float:
+        """How tough this wave's zombies are. Constant in the mission; in
+        endless it creeps up, so the run always ends eventually."""
+        if self.phase != "endless":
+            return self.t.zombie_hp
+        return self.t.zombie_hp * (1.0 + self.t.endless_hp_growth * max(0, self.wave - 1))
 
     def arrive(self, now: float) -> list[Event]:
         """The squad has reached the helicopter. Whatever followed them there

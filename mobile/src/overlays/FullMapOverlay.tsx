@@ -14,9 +14,11 @@ import { T } from '../ui/T';
  * The whole floor. Plan way up, everyone named, a key for the marks, and one
  * large Close. Nothing decorative: the plan, the people, the way out.
  */
-export function FullMapOverlay({ map, me, myId, squad, zombies, identityOf, nameOf, onClose }: {
+export function FullMapOverlay({ map, me, myId, squad, zombies, identityOf, nameOf, onClose, showHeli = true }: {
   map: MapInfo; me: MapPose; myId: string | undefined; squad: PlayerSnap[]; zombies: ZombieRow[];
   identityOf: (id: string) => Identity; nameOf: (id: string) => string; onClose: () => void;
+  /** False in endless mode: no helicopter on the plan or in the key. */
+  showHeli?: boolean;
 }) {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -31,7 +33,7 @@ export function FullMapOverlay({ map, me, myId, squad, zombies, identityOf, name
     <View style={[StyleSheet.absoluteFill, styles.root, { paddingLeft: pad.l, paddingRight: pad.r, paddingTop: pad.t, paddingBottom: pad.b }]}>
       <View style={{ width: mapW, height: mapH }}>
         <MapView map={map} me={me} myId={myId} squad={squad} zombies={zombies} identityOf={identityOf} nameOf={nameOf}
-          width={mapW} height={mapH} mode="full" />
+          width={mapW} height={mapH} mode="full" showHeli={showHeli} />
         {/* Framing corners. */}
         <Svg width={mapW} height={mapH} style={StyleSheet.absoluteFill} pointerEvents="none">
           <Path d={`M 1 ${c} V 1 H ${c} M ${mapW - c} 1 H ${mapW - 1} V ${c} M ${mapW - 1} ${mapH - c} V ${mapH - 1} H ${mapW - c} M ${c} ${mapH - 1} H 1 V ${mapH - c}`}
@@ -47,7 +49,7 @@ export function FullMapOverlay({ map, me, myId, squad, zombies, identityOf, name
           <View style={{ gap: space[2] }} accessibilityLabel="Map key">
             <Key label="You"><MeMark x={11} y={11} scale={0.85} /></Key>
             {mate ? <Key label="Squad"><MateMark x={11} y={11} identity={identityOf(mate.id)} state="alive" scale={1.2} /></Key> : null}
-            <Key label="Helicopter"><HeliMark x={11} y={11} scale={1.1} /></Key>
+            {showHeli ? <Key label="Helicopter"><HeliMark x={11} y={11} scale={1.1} /></Key> : null}
             {/* One line per kind of zombie that is on the map right now. */}
             {kinds.map((type) => (
               <Key key={type} label={KIND_LABEL[zombieKind(type)]}><ZombieMark x={11} y={11} type={type} scale={type === 3 ? 1.1 : 1.45} /></Key>
