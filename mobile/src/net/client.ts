@@ -16,6 +16,13 @@ class NetClient {
   // the server has already seen (it drops repeats).
   private seq = Date.now();
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private gunListeners = new Set<(m: { t: 'trigger'; down: boolean } | { t: 'reload_btn' }) => void>();
+
+  /** Button presses relayed from this player's paired gun. Returns an unsubscribe. */
+  onGun(cb: (m: { t: 'trigger'; down: boolean } | { t: 'reload_btn' }) => void) {
+    this.gunListeners.add(cb);
+    return () => { this.gunListeners.delete(cb); };
+  }
 
   get isOpen() { return this.ws?.readyState === WebSocket.OPEN; }
 
@@ -40,6 +47,7 @@ class NetClient {
           settled = true;
           if (m.t === 'welcome') { this.retry = 0; resolve(); } else { this.byUser = true; reject(new Error(m.msg)); }
         }
+        if (m.t === 'trigger' || m.t === 'reload_btn') { this.gunListeners.forEach((cb) => cb(m)); return; }
         useStore.getState().handle(m);
       };
       ws.onerror = () => { /* onclose follows */ };
@@ -82,6 +90,8 @@ class NetClient {
   }
 
   reload() { this.send({ t: 'reload' }); }
+  /** Open the 10 s window: the first gun to pull its trigger becomes this player's. */
+  pairGun() { this.send({ t: 'pair_gun' }); }
   /** Press (`on`) or release the Revive hold for a knocked teammate. */
   revive(target: string, on: boolean) { this.send({ t: 'revive', target, on }); }
   /** `on` while the helicopter's QR is in view and the player is holding. */

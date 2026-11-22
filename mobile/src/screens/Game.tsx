@@ -129,6 +129,15 @@ export function Game() {
   const up = useCallback(() => { if (auto.current) { clearInterval(auto.current); auto.current = null; } }, []);
   useEffect(() => up, [up]);
 
+  // A paired gun's buttons act exactly like the on-screen ones.
+  const pad = useRef({ down, up });
+  pad.current = { down, up };
+  useEffect(() => net.onGun((m) => {
+    if (m.t === 'reload_btn') net.reload();
+    else if (m.down) { if (!auto.current) pad.current.down(); }
+    else pad.current.up();
+  }), []);
+
   // Feedback haptics.
   const lastShot = s.shots[s.shots.length - 1];
   const lastDamage = s.damages[s.damages.length - 1];

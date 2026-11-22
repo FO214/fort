@@ -76,7 +76,13 @@ classes and the map), then `lobby` on every roster change.
 | `fire {seq, hits, heading}` `reload` | `fired` `zhit` `zkill` `reload` `reloaded` |
 | `revive {target, on}` | `hurt {dir}` `knocked` `revived` `dead` |
 | `extract {on}` `arrived` (host) | `phase` `wave` `extract {progress, holders, need}` |
+| `pair_gun` | `pairing {until}` `gun {on}` `trigger {down}` `reload_btn` |
 | `reset` (host) `leave` `ping` | `ended {outcome, results}` `error` |
+
+**Guns** connect to `/device` and send `hello {gun_id}`, then `btn {b: "trigger"|"reload", down}`;
+the server answers `paired` or `unpaired`. A phone's `pair_gun` opens a 10 s window and the
+first unpaired gun to pull its trigger becomes that player's (pairing in `app/devices.py`).
+A gun whose player is gone is freed. Presses reach the phone as `trigger` / `reload_btn`.
 
 The gun messages in the spec (`pair_gun`, `/device`, `trigger`, `reload_btn`)
 are not built yet; phones use their on-screen Fire and Reload.

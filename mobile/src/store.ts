@@ -51,6 +51,10 @@ interface State {
   gpsAcc: number | null;       // newest reported GPS accuracy, null before the first fix
   hasCompass: boolean;
   sensorError: string | null;
+  /** The player's physical gun: none, waiting for its first trigger pull, or paired and connected. */
+  gun: 'none' | 'pairing' | 'paired';
+  /** Call after sending pair_gun; shows "pairing" until a gun answers or the window closes. */
+  startPairing: () => void;
 
   setName: (n: string) => void;
   setServerUrl: (u: string) => void;
@@ -120,6 +124,7 @@ export const useStore = create<State>((set, get) => ({
   gpsAcc: null,
   hasCompass: false,
   sensorError: null,
+  gun: 'none',
 
   setName: (name) => { set({ name }); persist(get); },
   setServerUrl: (serverUrl) => { set({ serverUrl }); persist(get); },
@@ -129,6 +134,11 @@ export const useStore = create<State>((set, get) => ({
   setGpsAcc: (gpsAcc) => set({ gpsAcc }),
   setHasCompass: (hasCompass) => set({ hasCompass }),
   setSensorError: (sensorError) => set({ sensorError }),
+  startPairing: () => {
+    set({ gun: 'pairing' });
+    // The server's window is 10 s; give up on screen a moment after.
+    setTimeout(() => { if (get().gun === 'pairing') set({ gun: 'none' }); }, 11000);
+  },
 
   handle: (m) => {
     const s = get();
@@ -223,6 +233,9 @@ export const useStore = create<State>((set, get) => ({
         set({ feed: [...s.feed.slice(-5), m.cleared ? feedItem(label, 'good', 'cleared') : feedItem(label, 'plain', `${m.count ?? ''} incoming`)] });
         return;
       }
+      case 'gun':
+        set({ gun: m.on ? 'paired' : 'none' });
+        return;
       case 'reload':
         if (m.player_id === myId) set({ reloadingUntil: m.until });
         return;
@@ -246,7 +259,7 @@ export const useStore = create<State>((set, get) => ({
     set({
       phase: 'menu', session: null, hostId: null, roster: [], settings: null, roomPhase: 'lobby',
       ended: null, feed: [], shots: [], damages: [], squad: [], mission: NO_MISSION, extract: NO_EXTRACT, zombieCount: 0,
-      error: null, connection: 'idle',
+      error: null, connection: 'idle', gun: 'none',
     });
     persist(get, null);
   },

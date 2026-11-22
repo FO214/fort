@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import TypeAdapter, ValidationError
 
 from . import models as m
+from .devices import Devices
 from .mapdata import available_maps, load_map
 from .mission import Tuning
 from .room import GameError, Player, Room, RoomManager
@@ -28,8 +29,9 @@ DISCONNECT_GRACE_S = 90.0     # keep a dropped player's slot this long for resum
 FirstMessage = TypeAdapter(m.Create | m.Join | m.Resume)
 InGameMessage = TypeAdapter(
     m.Ready | m.SetClass | m.Start | m.Pos | m.Fire | m.Reload | m.Revive | m.Extract
-    | m.Arrived | m.Leave | m.Reset | m.Ping
+    | m.Arrived | m.PairGun | m.Leave | m.Reset | m.Ping
 )
+DeviceMessage = TypeAdapter(m.DeviceBtn | m.DeviceHello)
 
 
 def classes_payload() -> dict[str, Any]:
@@ -42,6 +44,8 @@ class Hub:
     def __init__(self) -> None:
         self.rooms = RoomManager(Tuning.from_env())
         self.sockets: dict[str, dict[str, WebSocket]] = {}   # code -> pid -> ws
+        self.devices = Devices()
+        self.guns: dict[str, WebSocket] = {}                 # gun id -> ws
         self._task: Optional[asyncio.Task[None]] = None
         self._disconnect_at: dict[tuple[str, str], float] = {}
         self._tick = 0
@@ -85,6 +89,15 @@ class Hub:
             await ws.send_json(payload)
         except Exception:
             pass
+
+    def player_exists(self, owner: tuple[str, str]) -> bool:
+        room = self.rooms.get(owner[0])
+        return room is not None and owner[1] in room.players
+
+    async def send_player(self, owner: tuple[str, str], payload: dict[str, Any]) -> None:
+        ws = self.sockets.get(owner[0], {}).get(owner[1])
+        if ws is not None:
+            await self.send(ws, payload)
 
     async def broadcast(self, code: str, payload: dict[str, Any]) -> None:
         for ws in list(self.sockets.get(code, {}).values()):
@@ -221,6 +234,71 @@ async def ws_endpoint(ws: WebSocket) -> None:
                 await hub.broadcast(room.code, room.lobby_state())
 
 
+@app.websocket("/device")
+async def device_endpoint(ws: WebSocket) -> None:
+    """One gun. First message `hello {gun_id}`, then `btn {b, down}`. Presses
+    go on to the paired player's phone, which treats them like its own
+    on-screen buttons."""
+    await ws.accept()
+    gun_id: Optional[str] = None
+    trigger_down = False
+    try:
+        try:
+            hello = m.DeviceHello.model_validate(await ws.receive_json())
+        except ValidationError:
+            await hub.send(ws, {"t": "error", "msg": "Say hello first"})
+            await ws.close()
+            return
+        gun_id = hello.gun_id
+        old = hub.guns.get(gun_id)
+        hub.guns[gun_id] = ws
+        if old is not None:
+            with contextlib.suppress(Exception):
+                await old.close()
+        owner = hub.devices.owner(gun_id)
+        await hub.send(ws, {"t": "paired" if owner else "unpaired"})
+        if owner:
+            await hub.send_player(owner, {"t": "gun", "on": True})
+
+        while True:
+            try:
+                msg = DeviceMessage.validate_python(await ws.receive_json())
+            except ValidationError:
+                continue
+            if not isinstance(msg, m.DeviceBtn):
+                continue
+            owner = hub.devices.owner(gun_id)
+            if owner is not None and not hub.player_exists(owner):
+                # Its player is gone (left, page reloaded, room closed): free the gun.
+                hub.devices.forget_player(owner)
+                owner = None
+            if owner is None:
+                # Unpaired: the first trigger pull may claim the gun.
+                if msg.b == "trigger" and msg.down:
+                    owner = hub.devices.claim(gun_id, time.time())
+                    if owner:
+                        await hub.send(ws, {"t": "paired"})
+                        await hub.send_player(owner, {"t": "gun", "on": True})
+                continue
+            if msg.b == "trigger":
+                trigger_down = msg.down
+                await hub.send_player(owner, {"t": "trigger", "down": msg.down})
+            elif msg.down:
+                await hub.send_player(owner, {"t": "reload_btn"})
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        log.exception("device socket error")
+    finally:
+        if gun_id and hub.guns.get(gun_id) is ws:
+            del hub.guns[gun_id]
+            owner = hub.devices.owner(gun_id)
+            if owner:
+                if trigger_down:               # never leave a gun firing after it drops
+                    await hub.send_player(owner, {"t": "trigger", "down": False})
+                await hub.send_player(owner, {"t": "gun", "on": False})
+
+
 def _same_token(a: str, b: str) -> bool:
     return hmac.compare_digest(a.encode(), b.encode())
 
@@ -256,9 +334,16 @@ async def handle(room: Room, p: Player, msg: Any, now: float, ws: WebSocket) -> 
     elif isinstance(msg, m.Arrived):
         for e in room.arrived(p.id, now):
             await hub.broadcast(code, e)
+    elif isinstance(msg, m.PairGun):
+        until = hub.devices.start_pairing((code, p.id), now)
+        await hub.send(ws, {"t": "pairing", "until": until})
+        gun = hub.devices.gun_of((code, p.id))
+        if gun and gun in hub.guns:
+            await hub.send(ws, {"t": "gun", "on": True})
     elif isinstance(msg, m.Reset):
         room.reset(p.id)
         await hub.broadcast(code, room.lobby_state())
     elif isinstance(msg, m.Leave):
+        hub.devices.forget_player((code, p.id))
         room.remove_player(p.id)
         await hub.broadcast(code, room.lobby_state())
