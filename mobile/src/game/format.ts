@@ -20,12 +20,12 @@ const count = (n: number) => WORD[n] ?? String(n);
 
 /**
  * What the extraction line says, for holders and defenders alike: how many
- * are on the code, and what is still missing.
+ * are holding, and what is still missing.
  */
 export function extractionLine(holding: number, need: number, progress: number): string {
   const tally = `${holding} of ${need} holding`;
   if (holding >= need) return `${tally}. Cover them.`;
-  if (holding === 0) return progress > 0 ? `Paused. ${tally}.` : `${tally}. Aim at the helicopter code and hold.`;
+  if (holding === 0) return progress > 0 ? `Paused. ${tally}.` : `${tally}. Press and hold to extract.`;
   return `${progress > 0 ? 'Paused. ' : ''}${tally}. Need ${count(need - holding)} more.`;
 }
 

@@ -5,7 +5,7 @@
 import { test, expect } from '@playwright/test';
 import {
   LANDSCAPE, PORTRAIT, abortMission, createSquad, faceNearest, fightUntil, holdDown, hud, intoMission, joinSquad, me, phone, place,
-  release, shot, showQr, startMission, walkTo, world,
+  release, shot, startMission, walkTo, world,
 } from './helpers';
 
 const WAVE_1 = 5;      // a four-player first wave under the e2e pacing in playwright.config.ts
@@ -260,16 +260,12 @@ test('full mission: knocked and revived, reach the helicopter, hold, two extract
     fightUntil(di.page, done, { everyMs: 420, timeoutMs: 90_000 }),
   ]);
   try {
-    // No code in view: nothing to hold. The wrong code does not count either.
-    await expect(ada.page.getByTestId('extract-aim')).toBeVisible();
-    await showQr(ada.page, 'SOME-OTHER-CODE');
-    await expect(ada.page.getByTestId('extract-wrong')).toContainText('not the helicopter code');
-    await expect(ada.page.getByTestId('extract-hold')).toHaveCount(0);
-    await shot(ada.page, '15-final-aim-at-code');
-
-    // Ada finds the helicopter's code and holds. One player is not enough.
-    await showQr(ada.page, 'LOONIE:HELI');
+    // The way out is a button on the screen: nothing to find, nothing to scan.
     await expect(ada.page.getByTestId('extract-hold')).toContainText('Hold to extract');
+    await expect(ada.page.getByTestId('extract-holders')).toContainText('Press and hold to extract');
+    await shot(ada.page, '15-final-hold-to-extract');
+
+    // Ada holds. One player is not enough.
     await holdDown(ada.page, 'extract-hold');
     await expect(bo.page.getByTestId('extract-holders')).toContainText('1 of 2 holding. Need one more.');
     await expect(ada.page.getByTestId('extract-hold')).toContainText('Need one more');
@@ -277,8 +273,7 @@ test('full mission: knocked and revived, reach the helicopter, hold, two extract
     await expect(ada.page.getByTestId('extract-bar')).toHaveAttribute('aria-label', 'extraction 0 percent');
     await shot(ada.page, '16-final-one-holding');
 
-    // Bo joins her on the code: the bar fills and they are out.
-    await showQr(bo.page, 'LOONIE:HELI');
+    // Bo holds too: the bar fills and they are out.
     await holdDown(bo.page, 'extract-hold');
     await expect(cy.page.getByTestId('extract-holders')).toContainText('2 of 2 holding');
     await expect(cy.page.getByTestId('objective')).toContainText('Cover them');
@@ -474,6 +469,67 @@ test('endless mode: the host picks it, waves keep coming with no helicopter, and
   await ada.page.getByTestId('again').click();
   for (const p of [ada, bo]) await expect(p.page.getByTestId('mode-chip')).toContainText('Endless');
   for (const p of [ada, bo]) await p.ctx.close();
+});
+
+test('"We\'re here": the host presses it, GPS still short of the helicopter, and the holdout starts for everyone', async ({ browser }) => {
+  const ada = await phone(browser, 'Ada');
+  const code = await createSquad(ada);
+  const bo = await phone(browser, 'Bo');
+  await joinSquad(bo, code);
+  await expect(ada.page.getByTestId('player-Bo')).toBeVisible();
+  await startMission([ada, bo]);
+  for (const p of [ada, bo]) await intoMission(p);
+
+  // 45 m out by a good fix: not offered. The same reading from a fix only sure
+  // to ±30 m is: she may well be standing under the helicopter.
+  await place(bo.page, 3, 14);
+  await ada.page.evaluate(() => window.__loonieSim!.at(0, -15, { acc: 3, snap: true }));
+  await expect(ada.page.getByTestId('heli-dist')).toHaveText('45 m');
+  await expect(ada.page.getByTestId('arrived')).toHaveCount(0);
+  await ada.page.evaluate(() => window.__loonieSim!.at(0, -15, { acc: 30, snap: true }));
+  await expect(ada.page.getByTestId('arrived')).toBeVisible();
+
+  // 16 m out: too far for GPS to call it, close enough for the HUD to offer the button.
+  await place(ada.page, 0, 14);
+  await expect(ada.page.getByTestId('objective')).toContainText('Reach the helicopter');
+  await expect(bo.page.getByTestId('arrived')).toHaveCount(0);                   // the host's call, nobody else's
+  const button = ada.page.getByTestId('arrived');
+  await expect(button).toBeVisible();
+  // It must be somewhere a finger can reach it: clear of the corner panels, and
+  // inside the box that lays it out (a control hung outside its parent draws
+  // on a phone but may not take touches there).
+  const box = (await button.boundingBox())!, stats = (await ada.page.getByTestId('stats').boundingBox())!;
+  expect(box.x + box.width).toBeLessThanOrEqual(stats.x);
+  const outside = await button.evaluate((el) => {
+    const b = el.getBoundingClientRect();
+    let levels = 0;
+    for (let p = el.parentElement; p && p.getAttribute('data-testid') !== 'game'; p = p.parentElement) {
+      const r = p.getBoundingClientRect();
+      levels++;
+      if (b.left < r.left - 0.5 || b.right > r.right + 0.5 || b.top < r.top - 0.5 || b.bottom > r.bottom + 0.5) return `sticks out of ancestor ${levels}`;
+    }
+    return levels > 2 ? null : 'never found the game root';
+  });
+  expect(outside).toBeNull();
+  await shot(ada.page, '28-were-here');
+  await button.click();
+  for (const p of [ada, bo]) await expect(p.page.getByTestId('objective')).toContainText('Hold the zone');
+  await expect(ada.page.getByTestId('arrived')).toHaveCount(0);
+  for (const p of [ada, bo]) await p.ctx.close();
+});
+
+test('"We\'re here" from the mission menu works wherever GPS has put the host', async ({ browser }) => {
+  const ada = await phone(browser, 'Ada');
+  await createSquad(ada);
+  await startMission([ada]);
+  await intoMission(ada);
+  await place(ada.page, 40, -40);                                                // GPS has her streets away
+  await expect(ada.page.getByTestId('objective')).toContainText('Reach the helicopter');
+  await expect(ada.page.getByTestId('arrived')).toHaveCount(0);
+  await ada.page.getByTestId('hud-menu').click();
+  await ada.page.getByTestId('arrived-menu').click();
+  await expect(ada.page.getByTestId('objective')).toContainText('Hold the zone');
+  await ada.ctx.close();
 });
 
 test('a phone that reloads the page mid-mission drops back into it', async ({ browser }) => {

@@ -20,9 +20,7 @@ export type SensorEvent =
   | { k: 'accel'; magnitude: number }
   /** Simulator only: one step taken / camera pitch set directly. */
   | { k: 'step' }
-  | { k: 'pitch'; deg: number }
-  /** Simulator only: a QR code enters (data) or leaves (null) the camera's view. */
-  | { k: 'qr'; data: string | null };
+  | { k: 'pitch'; deg: number };
 
 export type Listener = (e: SensorEvent) => void;
 export type Stop = () => void;
@@ -42,8 +40,6 @@ export interface SimHandle {
   face: (bearing: number, pitch?: number) => void;
   /** Take n steps along the current heading. */
   step: (n?: number) => void;
-  /** Hold a QR code up to the camera (its text), or take it away (null). */
-  qr: (data: string | null) => void;
 }
 
 /**
@@ -100,7 +96,6 @@ export function simHandle(): SimHandle {
         if (pitch != null) h.emit({ k: 'pitch', deg: pitch });
       },
       step(n = 1) { for (let i = 0; i < n; i++) h.emit({ k: 'step' }); },
-      qr(data) { h.emit({ k: 'qr', data }); },
     };
     window.__loonieSim = h;
   }

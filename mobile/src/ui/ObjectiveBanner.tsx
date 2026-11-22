@@ -88,7 +88,12 @@ export function ObjectiveBanner({ mission, extract, me, heli, elapsed, maxWidth,
   }
 
   return (
-    <View>
+    // The control sits beside the objective where there is room between the
+    // corners, and wraps underneath where there is not. Either way it is laid
+    // out inside this box: a control hung outside its parent's bounds draws
+    // fine but a phone may not deliver touches to it, and it can land on top
+    // of the corner panels.
+    <View style={[styles.wrap, { maxWidth }]}>
       <HudPanel strong accent={colors.status.objective} testID="objective"
         contentStyle={[styles.panel, { maxWidth }, mission.phase === 'final' && { width: Math.min(330, maxWidth) }]}>
         <View style={styles.line}>
@@ -97,8 +102,7 @@ export function ObjectiveBanner({ mission, extract, me, heli, elapsed, maxWidth,
         </View>
         {body}
       </HudPanel>
-      {/* Hangs off the right-hand side, so the objective itself stays centred. Where there is no side, it goes underneath. */}
-      {children ? <View style={tight ? styles.below : styles.aside}>{children}</View> : null}
+      {children}
     </View>
   );
 }
@@ -139,8 +143,7 @@ export function EventBanner() {
 const styles = StyleSheet.create({
   panel: { paddingLeft: space[4], paddingRight: space[3], paddingVertical: space[2], alignItems: 'center', gap: 2 },
   line: { flexDirection: 'row', alignItems: 'center', gap: space[2] },
-  aside: { position: 'absolute', left: '100%', top: 0, bottom: 0, marginLeft: space[2], justifyContent: 'center' },
-  below: { alignItems: 'center', marginTop: space[1] },
+  wrap: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', columnGap: space[2], rowGap: space[1] },
   event: { paddingHorizontal: space[5], paddingTop: space[1] + 3, paddingBottom: space[1], alignItems: 'center', minWidth: 200 },
   eventTitle: { fontSize: 36, lineHeight: 36 },
   eventRule: { position: 'absolute', top: 0, left: 0, right: 0, height: 3 },

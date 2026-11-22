@@ -8,7 +8,7 @@ import { Sheet } from '../ui/Sheet';
 import { T } from '../ui/T';
 
 const ITEMS: { key: PermissionKey; icon: IconName; name: string; why: string; optional?: boolean }[] = [
-  { key: 'camera', icon: 'camera', name: 'Camera', why: 'Shows the room behind the display, so zombies appear where you are standing. It also reads the helicopter code.' },
+  { key: 'camera', icon: 'camera', name: 'Camera', why: 'Shows the room behind the display, so zombies appear where you are standing.' },
   { key: 'location', icon: 'location', name: 'Location', why: 'Places you on the building map, so the squad and the zombies line up for everyone.' },
   { key: 'motion', icon: 'motion', name: 'Motion', why: 'Follows where your blaster points and counts your steps between GPS fixes.', optional: true },
 ];

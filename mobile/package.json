@@ -53,9 +53,9 @@
     "e2e": "npm run export:web && playwright test -c e2e/playwright.config.ts",
     "e2e:only": "playwright test -c e2e/playwright.config.ts",
     "test:logic": "LOGIC_ONLY=1 playwright test -c e2e/playwright.config.ts logic",
-    "heli-qr": "node scripts/make-heli-qr.mjs",
     "brand": "node scripts/make-brand-assets.mts",
-    "sounds": "node scripts/make-sounds.mts"
+    "sounds": "node scripts/make-sounds.mts",
+    "sounds:import": "node scripts/import-sounds.mts"
   },
   "private": true,
   "engines": {

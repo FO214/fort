@@ -64,7 +64,7 @@ class Player:
     reviving: Optional[str] = None      # id of the teammate this player is holding Revive on
     revive_by: Optional[str] = None     # while knocked: who is reviving us
     revive_progress: float = 0.0        # ...and how far along, 0..1
-    extracting: bool = False            # holding to extract with the helicopter QR in view
+    extracting: bool = False            # holding the extract button
 
     @property
     def max_hp(self) -> int:

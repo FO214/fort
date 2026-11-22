@@ -142,8 +142,7 @@ class Revive(BaseModel):
 
 
 class Extract(BaseModel):
-    """`on` while this phone has the helicopter's QR code in view and the
-    player is holding the screen."""
+    """`on` while the player is holding the extract button."""
     t: Literal["extract"]
     on: bool
 

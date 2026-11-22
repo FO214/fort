@@ -72,8 +72,7 @@ tools/build_schmeichel.py  generates that file; edit the numbers there
   player, and a bite on the reviver cancels it. Revived at 50 %, then 30 %,
   then 20 % health.
 - **Extraction.** In the final wave a phone sends `extract {on: true}` while
-  the helicopter's QR code is in its camera and the player is holding the
-  screen. The bar fills only while at least 2 players are holding (1 when
+  the player is holding the extract button. The bar fills only while at least 2 players are holding (1 when
   only one player is not dead). Letting go pauses it. Holders cannot fire.
 
 ## Protocol (JSON, `t` is the type)

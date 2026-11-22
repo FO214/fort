@@ -6,8 +6,10 @@
  * Every cue is a few lines of arithmetic: tones, noise and envelopes, written
  * as 16-bit mono WAV into assets/sounds/. They are placeholders in the same
  * sense as the code-drawn zombies: short, distinct from one another, and
- * ranked so that what matters most is loudest. Swap any file for a recorded
- * sound and the app plays that instead.
+ * ranked so that what matters most is loudest.
+ *
+ * A cue with a recording (see recorded-sounds.mts) is skipped here: its file
+ * comes from import-sounds.mts instead, and this script must not write over it.
  *
  *   fire-*    one per weapon: pistol crack, SMG tick, shotgun boom, rifle crack and tail
  *   empty     a dry double click
@@ -19,6 +21,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { RECORDED } from './recorded-sounds.mts';
 
 const RATE = 22050;
 const out = join(dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'sounds');
@@ -44,11 +47,16 @@ const mix = (...parts: [number, Voice, Voice][]): Voice => {
 };
 const glide = (from: number, to: number, length: number) => (t: number) => from + (to - from) * Math.min(1, t / length);
 
+let written = 0;
 function write(name: string, seconds: number, voice: Voice, peak = 0.85): void {
   const n = Math.round(seconds * RATE);
   const samples = new Float64Array(n);
   let max = 1e-9;
   for (let i = 0; i < n; i++) { samples[i] = voice(i / RATE); max = Math.max(max, Math.abs(samples[i])); }
+  // A recording has this cue. Skipped only now, after drawing its noise, so
+  // the cues after it come out the same as they always have.
+  if (name in RECORDED) return;
+  written++;
   const data = Buffer.alloc(n * 2);
   for (let i = 0; i < n; i++) {
     const fade = Math.min(1, (n - i) / (0.004 * RATE));           // no click at the end
@@ -83,4 +91,4 @@ write('wave', 0.6, mix([0.8, sine(110), (t) => Math.min(1, t / 0.25) * Math.exp(
 write('win', 0.75, mix(note(523.25, 0, 0.2), note(659.25, 0.16, 0.2), note(783.99, 0.32, 0.42), note(1046.5, 0.32, 0.42, 0.4)), 0.85);
 write('loss', 0.9, mix(note(311.13, 0, 0.26), note(261.63, 0.22, 0.26), note(196, 0.44, 0.46), note(98, 0.44, 0.46, 0.6)), 0.85);
 
-console.log('wrote 13 cues to assets/sounds');
+console.log(`wrote ${written} cues to assets/sounds; ${Object.keys(RECORDED).length} more are recordings (npm run sounds:import)`);

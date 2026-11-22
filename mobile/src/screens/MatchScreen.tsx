@@ -5,6 +5,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 import { feedback } from '../game/feedback';
+import { HordeEar, nearestDistance } from '../game/horde';
+import { setHorde } from '../game/sound';
 import { distXY } from '../game/geo';
 import { identityOf } from '../game/identity';
 import { permissionsReady, usePermissions } from '../game/permissions';
@@ -21,7 +23,6 @@ import { HudMenu } from '../overlays/HudMenu';
 import { KnockedOverlay } from '../overlays/KnockedOverlay';
 import { PermissionOverlay } from '../overlays/PermissionOverlay';
 import { RevivePrompt } from '../overlays/RevivePrompt';
-import { isSim } from '../sensors';
 import { selectClass, selectMe, serverNow, useStore, zombies } from '../store';
 import { alpha, borders, colors, hud, space, touch } from '../theme';
 import { AmmoReadout } from '../ui/AmmoReadout';
@@ -45,9 +46,14 @@ const REVIVE_RANGE_M = 4;
 const REVIVE_SLACK_CAP_M = 25;
 /** A position estimate looser than this is worth telling the player about. */
 const WEAK_GPS_M = 25;
-const SIMULATED = isSim();
 /** This close to the helicopter, the host is offered "We're here" on the HUD itself. */
 const ARRIVAL_PROMPT_M = 20;
+/**
+ * ...plus however unsure the phone is of where it is, up to this. Indoors GPS
+ * can sit 30 m off, and a squad standing under the helicopter with a fix that
+ * far out is exactly who needs the button.
+ */
+const ARRIVAL_PROMPT_SLACK_M = 30;
 
 /** The nearest knocked teammate close enough to revive, by the server's rule. */
 function revivable(me: PlayerSnap | undefined, squad: PlayerSnap[]): PlayerSnap | null {
@@ -100,28 +106,21 @@ export function MatchScreen() {
   const final = s.mission.phase === 'final';
   // Endless: no helicopter, no arrival, no extraction. Only the waves and the clock.
   const endless = s.mission.phase === 'endless';
-  const heliQr = s.map?.helicopter.qr ?? '';
 
-  // Clock for the HUD (reload sweep, feed expiry, QR freshness). The AR layer has its own.
+  // Clock for the HUD (reload sweep, feed expiry). The AR layer has its own.
   const [now, setNow] = useState(serverNow());
-  const [qrInView, setQrInView] = useState(false);
-  const [wrongQr, setWrongQr] = useState(false);
   useEffect(() => {
-    const id = setInterval(() => {
-      setNow(serverNow());
-      setQrInView(!!heliQr && tracking.qrInView(heliQr));
-      setWrongQr(!!heliQr && tracking.wrongQrInView(heliQr));
-    }, 200);
+    const id = setInterval(() => setNow(serverNow()), 200);
     return () => clearInterval(id);
-  }, [heliQr]);
+  }, []);
 
   // What the crosshair is on. The AR layer keeps this current every frame.
   const aimRef = useRef<AimState>({ ids: [], heading: 0 });
   const [onTarget, setOnTarget] = useState(false);
 
-  // ---- hold to extract: only counts while the helicopter code is in view ----
+  // ---- hold to extract: a button on the screen, nothing to scan ----
   const [extractDown, setExtractDown] = useState(false);
-  const extracting = final && alive && extractDown && qrInView;
+  const extracting = final && alive && extractDown;
   useEffect(() => { net.extract(extracting); }, [extracting]);
   useEffect(() => { if (!final || !alive) setExtractDown(false); }, [final, alive]);
 
@@ -183,6 +182,20 @@ export function MatchScreen() {
   const bannerKey = s.banner?.key;
   useEffect(() => { if (bannerKey && s.banner?.tone !== 'neutral') feedback('wave'); }, [bannerKey]);   // eslint-disable-line react-hooks/exhaustive-deps
 
+  // The horde's voice: louder as the nearest zombie closes in, and pitched by
+  // how fast it is closing. Quiet once you are dead, or with sound switched off.
+  const hearHorde = deployed && s.prefs.sound && !!me && me.st !== 'dead';
+  useEffect(() => {
+    if (!hearHorde) return;
+    const ear = new HordeEar();
+    const id = setInterval(() => {
+      const t = serverNow();
+      const p = tracking.pose();
+      setHorde(ear.hear(nearestDistance(zombies.sample(t), p.x, p.y), t));
+    }, 100);
+    return () => { clearInterval(id); setHorde(null); };
+  }, [hearHorde]);
+
   // A refusal from the server ("Too far away to revive") shows briefly.
   useEffect(() => {
     if (!s.error) return;
@@ -231,6 +244,8 @@ export function MatchScreen() {
 
   const canArrive = isHost && s.mission.phase === 'journey';
   const heliDist = s.map ? distXY(pose.x, pose.y, s.map.helicopter.x, s.map.helicopter.y) : Infinity;
+  // With no fix at all GPS will never call the arrival, so the button is the only way in.
+  const offerArrival = canArrive && (!pose.hasFix || heliDist <= ARRIVAL_PROMPT_M + Math.min(pose.acc, ARRIVAL_PROMPT_SLACK_M));
   const mates = s.squad.filter((p) => p.id !== myId);
   const standing = mates.filter((p) => p.st === 'alive').map((p) => ({ name: nameOf(p.id), dist: distXY(me.x, me.y, p.x, p.y) })).sort((a, b) => a.dist - b.dist);
   const reloading = s.reloadingUntil > now;
@@ -248,12 +263,8 @@ export function MatchScreen() {
   return (
     <View style={styles.root} testID="game">
       {(perms.state?.camera ?? 'granted') === 'granted' ? (
-        // The camera is the background, and during the final wave it is also
-        // what reads the helicopter's QR code. No separate scanning mode.
-        <CameraView style={StyleSheet.absoluteFill} facing="back"
-          barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-          // With simulated sensors the code comes from the simulator, so the camera's own scanner stays off.
-          onBarcodeScanned={final && !SIMULATED ? (r) => tracking.noteQr(r.data) : undefined} />
+        // The camera is the background, and nothing more: it reads no codes.
+        <CameraView style={StyleSheet.absoluteFill} facing="back" />
       ) : null}
 
       <ZombieLayer width={width} height={height} cls={cls} aimRef={aimRef} onAimChange={setOnTarget} inset={Math.max(insets.left, insets.right)} />
@@ -314,7 +325,7 @@ export function MatchScreen() {
             <View style={{ maxWidth: centreMax, alignItems: 'center', gap: space[1] }} pointerEvents="box-none">
               <ObjectiveBanner mission={s.mission} extract={s.extract} me={pose} heli={s.map?.helicopter} maxWidth={centreMax}
                 elapsed={s.startedAt ? Math.max(0, now - s.startedAt) : null}>
-                {canArrive && heliDist <= ARRIVAL_PROMPT_M ? (
+                {offerArrival ? (
                   // GPS can refuse to admit the squad has arrived; the host can say so.
                   // Always in the mission menu; offered here once they are close.
                   <Pressable onPress={() => net.arrived()} testID="arrived" accessibilityRole="button" accessibilityLabel="We're here"
@@ -343,7 +354,7 @@ export function MatchScreen() {
             {target ? (
               <RevivePrompt name={nameOf(target.id)} holding={reviving} onHold={setReviveDown} progress={target.rb === myId ? target.rv : 0} />
             ) : final && alive ? (
-              <ExtractionOverlay qrInView={qrInView} wrongCode={wrongQr} holding={extracting} progress={s.extract.progress}
+              <ExtractionOverlay holding={extracting} progress={s.extract.progress}
                 holders={s.extract.holders.length} need={s.extract.need} onHold={setExtractDown} />
             ) : null}
           </View>

@@ -57,8 +57,8 @@ map, edit the numbers at the top of `backend/tools/build_schmeichel.py` and
 run it; that rewrites both the JSON and the picture. The host picks the map in the lobby,
 or start the server with `LOONIE_DEFAULT_MAP=schmeichel` to make it the default.
 
-The helicopter sign to print is `docs/helicopter-qr.svg` (regenerate with
-`npm run heli-qr` in `mobile/`).
+There is nothing to print or hang up: extraction is a hold button on the
+screen, not a code to scan.
 
 ## Run everything
 
@@ -101,9 +101,8 @@ These go beyond the spec, or settle something it left open.
 
 - **The arena has no place in the real world.** The host's GPS fix at the
   moment they press Start becomes map (0, 0) for everyone, and the helicopter
-  sits 30 m north of it. Where the printed QR code physically hangs is not
-  tied to that until step 5 gives the building a real map; the host's
-  "We're here" button covers the gap.
+  sits 30 m north of it. Nothing in the real world marks that spot; the
+  host's "We're here" button covers the gap.
 - **A phone with no GPS fix yet** is treated as standing at the map's start
   point until its first fix arrives.
 - **GPS is trusted less while you stand still** (no steps detected), so

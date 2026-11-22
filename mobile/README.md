@@ -34,6 +34,25 @@ Check with `node --version`; get the LTS installer from nodejs.org.
 5. Each phone then walks through **deploy**: turn it sideways, mount it on
    the blaster, wait for a position, count in.
 
+### On an iPhone hotspot
+
+Other phones on an iPhone hotspot may get only an IPv6 address, so they
+cannot reach the laptop at a `172.20.10.x` address: Expo Go says "the
+Internet connection appears to be offline". Serve both by the laptop's
+name instead, which works over IPv4 and IPv6 (the name is
+`scutil --get LocalHostName` plus `.local`):
+
+```sh
+# backend: '' listens on IPv4 and IPv6; 0.0.0.0 is IPv4 only
+.venv/bin/uvicorn app.main:app --host '' --port 8000
+# app
+REACT_NATIVE_PACKAGER_HOSTNAME=My-Mac.local \
+EXPO_PUBLIC_SERVER_URL=ws://My-Mac.local:8000/ws npx expo start
+```
+
+A server named this way at start-up wins over the address a phone remembers
+from Settings, so step 3 is not needed and an old address cannot linger.
+
 Camera and motion sensors need Expo Go (or https). A phone browser on plain
 http will not get them.
 
@@ -67,9 +86,8 @@ npm run export:web && npx serve -s dist -l 8081
 - **Revive.** When a knocked teammate is within reach, a Hold to revive
   button appears bottom-centre. The phone keeps telling the server while it
   is held.
-- **Extraction.** In the final wave the camera also reads QR codes. While
-  the helicopter's code is in view a Hold to extract button appears; holding
-  it tells the server. No separate scan mode.
+- **Extraction.** In the final wave a Hold to extract button appears
+  bottom-centre; holding it tells the server. Nothing to scan.
 
 `src/game/tracking.ts` ties the sensors to those modules and reports the
 phone's pose to the server 8 times a second.
@@ -97,7 +115,7 @@ src/ui/               shared pieces. Portrait: Button, TextField, MissionCodeInp
                       ProgressRing
 src/ui/ZombieLayer    places sprites over the camera, works out the aim, marks unseen zombies
 src/ui/ZombieSprite   what a zombie looks like: the one file to swap for real art
-assets/sounds/        audio cues (generated: npm run sounds)
+assets/sounds/        audio cues (shots and the knock are recordings: npm run sounds:import; the rest are generated: npm run sounds)
 e2e/                  Playwright: logic tests + simulated phones
 ```
 
@@ -145,6 +163,7 @@ it from Settings → Advanced → Design system, or `?gallery=1` on the web buil
 ```sh
 npm run brand        # src/assets/brand/*.svg and the app icons, from src/brand/geometry.ts
 npm run sounds       # assets/sounds/*.wav, synthesised placeholders
+npm run sounds:import  # the recorded cues, from ../sounds (needs ffmpeg); see scripts/recorded-sounds.mts
 ```
 
 ## Tests
@@ -162,8 +181,8 @@ The e2e uses Google Chrome if it is installed, otherwise run
 
 Sensors are driven through `window.__loonieSim` (web build with `?sim=1`):
 tests put each player at a map position, turn them to face a zombie, walk
-them with step and GPS events, hold a QR code up to the camera, and press
-and hold the real on-screen buttons. One test plays a whole mission with
+them with step and GPS events, and press and hold the real on-screen
+buttons. One test plays a whole mission with
 four phones: knocked, revived, arrive, hold two waves, two extract while
 two defend.
 
@@ -182,14 +201,6 @@ and the brand geometry.
 Screenshots of every screen and state land in `e2e/output/`. The "camera"
 in those screenshots is a drawn corridor (`e2e/fakeCamera.ts`).
 
-## The helicopter sign
-
-```sh
-npm run heli-qr      # writes ../docs/helicopter-qr.svg
-```
-Open it in a browser and print at 100 %. It encodes `LOONIE:HELI`, which is
-what every map shipped so far expects.
-
 ## Things that can only be checked on a real phone
 
 - Which way zombies sit relative to the real world (compass + landscape
@@ -203,9 +214,10 @@ what every map shipped so far expects.
 - Blur on the HUD's glass panels (iOS and web blur; Android uses the opaque
   fallback), and how the plates read over real rooms in daylight.
 - Haptic patterns and the loudness of the audio cues against each other.
-- Reading the helicopter QR code through the game camera. Tests simulate
-  "code in view"; the real scan path (`onBarcodeScanned`) has not run on a
-  device. Any QR whose text is `LOONIE:HELI` is the helicopter for now.
+- The zombie groan: how loud it is at each distance, and whether the pitch
+  shift as one closes in reads as intended (the maths is tested; ears are not).
+- That "We're here" takes a touch on a real phone, beside or under the
+  objective (the layout is tested in a browser, where touches are forgiving).
 
 ## Building for a phone without Expo Go
 

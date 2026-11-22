@@ -7,6 +7,7 @@ import { fromLocal, toLocal, angleDiffDeg } from '../src/game/geo';
 import { OrientationTracker, pitchFromAttitude } from '../src/game/orientation';
 import { PositionTracker, STEP_M } from '../src/game/position';
 import { StepDetector } from '../src/game/steps';
+import { EARSHOT_M, FULL_AT_M, HordeEar, RATE_MAX, RATE_MIN, hordeVoice, nearestDistance } from '../src/game/horde';
 import { ZombieBuffer, pickTargets, project, underCrosshair, type Camera } from '../src/game/zombies';
 import { spriteBox } from '../src/ui/spriteBox';
 
@@ -503,7 +504,7 @@ test.describe('what the screen says', () => {
   });
 
   test('the extraction line counts the holders and says what is missing', () => {
-    expect(extractionLine(0, 2, 0)).toBe('0 of 2 holding. Aim at the helicopter code and hold.');
+    expect(extractionLine(0, 2, 0)).toBe('0 of 2 holding. Press and hold to extract.');
     expect(extractionLine(1, 2, 0)).toBe('1 of 2 holding. Need one more.');
     expect(extractionLine(2, 2, 0.4)).toBe('2 of 2 holding. Cover them.');
     expect(extractionLine(1, 2, 0.4)).toBe('Paused. 1 of 2 holding. Need one more.');   // someone let go
@@ -546,5 +547,65 @@ test.describe('brand marks', () => {
     // Seven letters, plus the counters of the O and the two Rs.
     expect(WORDMARK.d.match(/M/g)).toHaveLength(10);
     expect(WORDMARK.d.match(/Z/g)).toHaveLength(10);
+  });
+});
+
+test.describe('the horde, heard', () => {
+  test('silent out of earshot, louder the nearer it is, full at arm\'s length', () => {
+    expect(hordeVoice(EARSHOT_M + 5, 0).volume).toBe(0);
+    expect(hordeVoice(EARSHOT_M, 0).volume).toBe(0);
+    const far = hordeVoice(20, 0).volume, mid = hordeVoice(10, 0).volume, near = hordeVoice(4, 0).volume;
+    expect(far).toBeGreaterThan(0);
+    expect(mid).toBeGreaterThan(far * 3);            // the last few metres do the shouting
+    expect(near).toBeGreaterThan(mid);
+    expect(hordeVoice(FULL_AT_M, 0).volume).toBe(1);
+    expect(hordeVoice(0.5, 0).volume).toBe(1);
+  });
+
+  test('Doppler: pitch rises as it closes, falls as it drops behind, and holds still when nothing moves', () => {
+    expect(hordeVoice(10, 0).rate).toBe(1);
+    const walkingIn = hordeVoice(10, 1.2).rate, bothWalking = hordeVoice(10, 2.7).rate;
+    expect(walkingIn).toBeGreaterThan(1.05);           // a zombie at walking pace is plainly audible
+    expect(bothWalking).toBeGreaterThan(walkingIn);
+    expect(hordeVoice(10, -1.2).rate).toBeLessThan(0.95);
+    // However fast, it stays a groan: never a squeak, never a slur.
+    expect(hordeVoice(10, 50).rate).toBeLessThanOrEqual(RATE_MAX);
+    expect(hordeVoice(10, -50).rate).toBeGreaterThanOrEqual(RATE_MIN);
+    // How loud is about distance alone.
+    expect(hordeVoice(10, 3).volume).toBe(hordeVoice(10, -3).volume);
+  });
+
+  test('the nearest zombie is the one that is heard', () => {
+    expect(nearestDistance([], 0, 0)).toBeNull();
+    expect(nearestDistance([{ x: 30, y: 0 }, { x: 3, y: 4 }, { x: -9, y: 0 }], 0, 0)).toBe(5);
+  });
+
+  test('a zombie walking in is heard closing; one walking away is heard leaving', () => {
+    const ear = new HordeEar();
+    let v = ear.hear(20, 0)!;
+    expect(v.rate).toBe(1);                            // one reading: no speed yet
+    for (let i = 1; i <= 30; i++) v = ear.hear(20 - 1.2 * i * 0.1, i * 0.1)!;      // three seconds at 1.2 m/s
+    expect(v.rate).toBeGreaterThan(1.07);
+    expect(v.rate).toBeLessThan(1.11);                 // settles on the walking-pace shift, no overshoot
+    for (let i = 1; i <= 30; i++) v = ear.hear(16.4 + 1.2 * i * 0.1, 3 + i * 0.1)!;
+    expect(v.rate).toBeLessThan(0.95);
+  });
+
+  test('a jump in distance is not speed: the nearest one dying, or GPS moving the player', () => {
+    const ear = new HordeEar();
+    for (let i = 0; i <= 20; i++) ear.hear(4, i * 0.1);                             // standing still beside one
+    const still = ear.hear(4, 2.1)!;
+    expect(still.rate).toBeCloseTo(1, 2);
+    const next = ear.hear(15, 2.2)!;                   // it dies; the next nearest is 15 m off
+    expect(next.rate).toBeCloseTo(1, 2);
+    expect(next.volume).toBeLessThan(still.volume);
+  });
+
+  test('nothing in earshot is silence, and coming back into earshot starts from rest', () => {
+    const ear = new HordeEar();
+    for (let i = 0; i <= 10; i++) ear.hear(10 - i * 0.3, i * 0.1);                  // closing fast
+    expect(ear.hear(null, 1.1)).toBeNull();
+    expect(ear.hear(EARSHOT_M + 1, 1.2)).toBeNull();
+    expect(ear.hear(12, 1.3)!.rate).toBe(1);
   });
 });

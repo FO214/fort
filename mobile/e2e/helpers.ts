@@ -40,7 +40,6 @@ declare global {
       aim: (heading: number, pitch?: number) => void;
       step: (n?: number) => void;
       fix: (lat: number, lon: number, acc?: number, snap?: boolean) => void;
-      qr: (data: string | null) => void;
     };
     __loonieStore?: { getState: () => Record<string, any> };
     __loonieZombies?: { latest: () => ZRow[] };
@@ -199,8 +198,6 @@ export async function holdDown(page: Page, testId: string): Promise<void> {
 
 export const release = (page: Page) => page.mouse.up();
 
-/** Hold a QR code up to this phone's camera, or take it away. */
-export const showQr = (page: Page, data: string | null) => page.evaluate((d) => window.__loonieSim!.qr(d), data);
 
 /** This player's own entry in the newest snapshot. */
 export const me = (page: Page) => page.evaluate(() => {

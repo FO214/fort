@@ -94,7 +94,7 @@ class NetClient {
   pairGun() { this.send({ t: 'pair_gun' }); }
   /** Press (`on`) or release the Revive hold for a knocked teammate. */
   revive(target: string, on: boolean) { this.send({ t: 'revive', target, on }); }
-  /** `on` while the helicopter's QR is in view and the player is holding. */
+  /** `on` while the player is holding the extract button. */
   extract(on: boolean) { this.send({ t: 'extract', on }); }
   /** Host only: "we're here", when GPS will not admit it. */
   arrived() { this.send({ t: 'arrived' }); }

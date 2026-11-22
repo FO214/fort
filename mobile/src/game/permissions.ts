@@ -1,7 +1,7 @@
 /**
  * What the game needs from the phone, and whether it has it.
  *
- *   camera    the live view behind the HUD, and reading the helicopter's code
+ *   camera    the live view behind the HUD
  *   location  where the player is in the building
  *   motion    where the blaster points and when the player steps (optional:
  *             the game still runs on GPS and compass without it)

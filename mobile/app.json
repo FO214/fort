@@ -12,7 +12,7 @@
       "supportsTablet": false,
       "bundleIdentifier": "app.loonie.mobile",
       "infoPlist": {
-        "NSCameraUsageDescription": "FortIRL shows the live camera behind the HUD, so zombies appear in the room with you, and reads the helicopter code to extract.",
+        "NSCameraUsageDescription": "FortIRL shows the live camera behind the HUD, so zombies appear in the room with you.",
         "NSLocationWhenInUseUsageDescription": "FortIRL uses your position and heading to place you, your squad and the zombies in the building.",
         "ITSAppUsesNonExemptEncryption": false,
         "NSMotionUsageDescription": "FortIRL uses motion to follow where your blaster points and to count your steps."
@@ -42,7 +42,7 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "FortIRL shows the live camera behind the HUD, so zombies appear in the room with you, and reads the helicopter code to extract."
+          "cameraPermission": "FortIRL shows the live camera behind the HUD, so zombies appear in the room with you."
         }
       ],
       [
