@@ -17,7 +17,7 @@ from pydantic import TypeAdapter, ValidationError
 from . import discovery
 from . import models as m
 from .devices import Devices
-from .mapdata import available_maps, load_map
+from .mapdata import available_maps, load_map, map_choices
 from .mission import Tuning
 from .room import GameError, Player, Room, RoomManager
 
@@ -29,7 +29,7 @@ DISCONNECT_GRACE_S = 90.0     # keep a dropped player's slot this long for resum
 
 FirstMessage = TypeAdapter(m.Create | m.Join | m.Resume)
 InGameMessage = TypeAdapter(
-    m.Ready | m.SetClass | m.Start | m.Pos | m.Fire | m.Reload | m.Revive | m.Extract
+    m.Ready | m.SetClass | m.SetMap | m.Start | m.Pos | m.Fire | m.Reload | m.Revive | m.Extract
     | m.Arrived | m.PairGun | m.Leave | m.Reset | m.Ping
 )
 DeviceMessage = TypeAdapter(m.DeviceBtn | m.DeviceHello)
@@ -197,7 +197,8 @@ async def ws_endpoint(ws: WebSocket) -> None:
         hub.attach(room.code, player.id, ws)
         await hub.send(ws, {"t": "welcome", "player_id": player.id, "token": player.token,
                             "code": room.code, "host_id": room.host_id,
-                            "classes": classes_payload(), "map": room.map.public()})
+                            "classes": classes_payload(), "map": room.map.public(),
+                            "maps": map_choices()})
         await hub.broadcast(room.code, room.lobby_state())
         now = time.time()
         if room.phase == "playing":
@@ -321,6 +322,9 @@ async def handle(room: Room, p: Player, msg: Any, now: float, ws: WebSocket) -> 
         await hub.broadcast(code, room.lobby_state())
     elif isinstance(msg, m.SetClass):
         room.set_class(p.id, msg.cls)
+        await hub.broadcast(code, room.lobby_state())
+    elif isinstance(msg, m.SetMap):
+        room.set_map(p.id, msg.map)
         await hub.broadcast(code, room.lobby_state())
     elif isinstance(msg, m.Start):
         started = room.start(p.id, now, msg.lat, msg.lon)

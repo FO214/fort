@@ -100,6 +100,8 @@ class NetClient {
   arrived() { this.send({ t: 'arrived' }); }
   ready(ready: boolean) { this.send({ t: 'ready', ready }); }
   setClass(cls: string) { this.send({ t: 'set_class', cls }); }
+  /** Host only, in the lobby. */
+  setMap(map: string) { this.send({ t: 'set_map', map }); }
   /** Host only. The fix (if any) anchors a map that has no fixed place in the world. */
   start(fix?: { lat: number; lon: number } | null) { this.send(fix ? { t: 'start', lat: fix.lat, lon: fix.lon } : { t: 'start' }); }
   /** Host only: back to the lobby (aborts a running mission). */

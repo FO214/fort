@@ -89,12 +89,27 @@ export function Lobby() {
   );
 
   const briefing = (
-    <Glass radius={radius.lg} padding={space.md} contentStyle={{ gap: space.xs }}>
+    <Glass radius={radius.lg} padding={space.md} contentStyle={{ gap: space.sm }}>
       <T v="label" c={color.ink3}>Mission</T>
       <T v="caption" c={color.ink2}>
-        Fight through the waves. The crosshair is your gun sight: put it on a zombie and fire.
-        {s.map ? `  Map: ${s.map.name}.` : ''}
+        Walk to the helicopter, hold it for two waves, then two of you hold on its code to extract.
+        The crosshair is your gun sight.
       </T>
+      <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: space.xs }} testID="map-row">
+        <T v="label" c={color.ink3}>Map</T>
+        {isHost && s.maps.length > 1 ? s.maps.map((m) => {
+          const active = s.map?.id === m.id;
+          return (
+            <Pressable key={m.id} onPress={() => net.setMap(m.id)} testID={`map-${m.id}`}
+              accessibilityRole="button" accessibilityState={{ selected: active }}>
+              <Glass radius={radius.pill} tint={active ? color.accent : undefined} strong={active}
+                contentStyle={{ paddingHorizontal: space.md, height: 32, justifyContent: 'center' }}>
+                <T v="caption" c={active ? color.accent : color.ink2} style={{ fontWeight: '600' }}>{m.name}</T>
+              </Glass>
+            </Pressable>
+          );
+        }) : <T v="caption" c={color.ink} style={{ fontWeight: '600' }} testID="map-name">{s.map?.name ?? '···'}</T>}
+      </View>
     </Glass>
   );
 

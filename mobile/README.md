@@ -63,6 +63,7 @@ src/sensors/          native (expo-location, expo-sensors) · web · sim (tests)
 src/game/             position, orientation, steps, zombies, tracking
 src/ui/ZombieLayer    places sprites over the camera, works out the aim
 src/ui/ZombieSprite   what a zombie looks like — the one file to swap for real art
+src/ui/MapView        the building's floor plan: minimap (gun-up) and full screen (tap the minimap)
 src/ui/ObjectiveBar   helicopter direction → hold 1/2 → extraction bar
 src/ui/ReviveButton, ExtractHold, DownedOverlay   the mission's hold actions and downed states
 src/ui/               Glass kit, Reticle, FireButton, Radar, HealthBar, Squad, …
@@ -91,6 +92,14 @@ four phones: knocked, revived, arrive, hold two waves, two extract while
 two defend.
 Screenshots of every screen land in `e2e/output/`. The "camera" in those
 screenshots is a drawn corridor (`e2e/fakeCamera.ts`).
+
+## The helicopter sign
+
+```sh
+npm run heli-qr      # writes ../docs/helicopter-qr.svg
+```
+Open it in a browser and print at 100 %. It encodes `LOONIE:HELI`, which is
+what every map shipped so far expects.
 
 ## Things that can only be checked on a real phone
 
