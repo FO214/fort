@@ -38,8 +38,9 @@ static const uint32_t PORTAL_TIMEOUT_S = 300;
 
 // Wi-Fi modem sleep: the radio naps between the hotspot's beacons. Sends (the
 // buttons) still go out at once; only messages *to* the gun wait for a beacon.
+// 0 = off, 1 = wake for every hotspot beacon, 2 = sleep across several beacons.
 #ifndef GUN_POWER_SAVE
-#define GUN_POWER_SAVE 1
+#define GUN_POWER_SAVE 2
 #endif
 
 // Transmit power follows the signal: just enough to reach the hotspot. RSSI is
@@ -255,8 +256,9 @@ void setup() {
   bool reloadHeld = digitalRead(PIN_RELOAD) == LOW;
   if (!saved || reloadHeld) runSetupPortal();             // does not return
 
-  WiFi.setSleep(GUN_POWER_SAVE ? true : false);
-  Serial.printf("wifi: joining [%s], power save %s\n", wm.getWiFiSSID(true).c_str(), GUN_POWER_SAVE ? "on" : "off");
+  static const wifi_ps_type_t PS_MODES[] = {WIFI_PS_NONE, WIFI_PS_MIN_MODEM, WIFI_PS_MAX_MODEM};
+  WiFi.setSleep(PS_MODES[GUN_POWER_SAVE]);
+  Serial.printf("wifi: joining [%s], power save %d\n", wm.getWiFiSSID(true).c_str(), GUN_POWER_SAVE);
   WiFi.begin();                                           // the saved network
   setTx(TX_MAX);
   Serial.printf("udp: listening on %u: %s\n", DISCOVERY_PORT + 1, udp.begin(DISCOVERY_PORT + 1) ? "ok" : "FAILED");
