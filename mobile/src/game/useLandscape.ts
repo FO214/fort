@@ -8,9 +8,13 @@ import { setHeadingOffset } from '../sensors';
  * way round, whichever the mount needs) and tell the compass which way the
  * camera now faces relative to the phone's top edge. On a phone with a motion
  * sensor, gravity refines this within a frame; this is the fallback.
+ *
+ * `enabled` holds the lock back while the deploy screen is still asking the
+ * player to turn the phone.
  */
-export function useLandscape(): void {
+export function useLandscape(enabled = true): void {
   useEffect(() => {
+    if (!enabled) return;
     if (Platform.OS === 'web') {
       const apply = () => {
         const angle = typeof screen !== 'undefined' ? screen.orientation?.angle ?? 0 : 0;
@@ -43,5 +47,5 @@ export function useLandscape(): void {
       setHeadingOffset(0);
       ScreenOrientation.unlockAsync().catch(() => {});
     };
-  }, []);
+  }, [enabled]);
 }

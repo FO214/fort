@@ -1,27 +1,21 @@
 {
   "expo": {
-    "name": "LOONIE",
+    "name": "FortIRL",
     "slug": "loonie",
-    "version": "0.1.0",
+    "version": "1.0.0",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "scheme": "loonie",
     "userInterfaceStyle": "dark",
-    "backgroundColor": "#06080D",
-    "newArchEnabled": true,
-    "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#06080D"
-    },
+    "backgroundColor": "#101211",
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "app.loonie.mobile",
       "infoPlist": {
-        "NSCameraUsageDescription": "LOONIE shows the live camera behind the HUD so zombies appear in the room with you.",
-        "NSLocationWhenInUseUsageDescription": "LOONIE uses your position and heading to place zombies around you.",
+        "NSCameraUsageDescription": "FortIRL shows the live camera behind the HUD, so zombies appear in the room with you, and reads the helicopter code to extract.",
+        "NSLocationWhenInUseUsageDescription": "FortIRL uses your position and heading to place you, your squad and the zombies in the building.",
         "ITSAppUsesNonExemptEncryption": false,
-        "NSMotionUsageDescription": "LOONIE uses motion to follow where the gun points and to count your steps."
+        "NSMotionUsageDescription": "FortIRL uses motion to follow where your blaster points and to count your steps."
       }
     },
     "android": {
@@ -30,7 +24,7 @@
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png",
-        "backgroundColor": "#06080D"
+        "backgroundColor": "#101211"
       },
       "permissions": [
         "CAMERA",
@@ -48,22 +42,34 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "LOONIE shows the live camera behind the HUD so zombies appear in the room with you."
+          "cameraPermission": "FortIRL shows the live camera behind the HUD, so zombies appear in the room with you, and reads the helicopter code to extract."
         }
       ],
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "LOONIE uses your position and heading to place zombies around you."
+          "locationWhenInUsePermission": "FortIRL uses your position and heading to place you, your squad and the zombies in the building."
         }
       ],
       [
         "expo-sensors",
         {
-          "motionPermission": "LOONIE uses motion to follow where the gun points and to count your steps."
+          "motionPermission": "FortIRL uses motion to follow where your blaster points and to count your steps."
         }
       ],
-      "expo-screen-orientation"
+      "expo-screen-orientation",
+      "expo-font",
+      "expo-status-bar",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#101211"
+        }
+      ],
+      "expo-asset",
+      "expo-audio"
     ]
   }
 }

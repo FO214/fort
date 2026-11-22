@@ -8,9 +8,9 @@ import { ensureFakeCamera } from './fakeCamera';
 //   a sandbox's preinstalled Chromium
 //   Google Chrome on this machine (no download needed)
 //   Playwright's own Chromium (`npx playwright install chromium`)
-const PREINSTALLED = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const PREINSTALLED = ['/opt/pw-browsers/chromium', '/opt/pw-browsers/chromium-1194/chrome-linux/chrome'];
 const MAC_CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const executablePath = process.env.CHROMIUM_PATH ?? (fs.existsSync(PREINSTALLED) ? PREINSTALLED : undefined);
+const executablePath = process.env.CHROMIUM_PATH ?? PREINSTALLED.find((p) => fs.existsSync(p));
 const channel = !executablePath && fs.existsSync(MAC_CHROME) ? 'chrome' : undefined;
 
 // A drawn corridor stands in for the camera (see fakeCamera.ts).

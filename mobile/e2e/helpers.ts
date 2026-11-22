@@ -10,10 +10,21 @@ import { BACKEND } from './playwright.config';
 
 export const OUT = path.join(__dirname, 'output');
 fs.mkdirSync(OUT, { recursive: true });
-export const shot = (p: Page, name: string) => p.screenshot({ path: path.join(OUT, `${name}.png`) });
+/** A screenshot for the record, once anything that just opened has finished arriving. */
+export const shot = async (p: Page, name: string) => {
+  await p.waitForTimeout(280);
+  await p.screenshot({ path: path.join(OUT, `${name}.png`) });
+};
 
 export const SERVER = `ws://localhost:${BACKEND}/ws`;
-const APP = `/?sim=1&server=${encodeURIComponent(SERVER)}`;
+export const DEVICE = `ws://localhost:${BACKEND}/device`;
+/**
+ * The app as a simulated phone. Most tests skip the deploy sequence (turn,
+ * mount, position, countdown) so they can get straight to the mission; the
+ * tests about deploying turn it back on.
+ */
+export const appUrl = (opts: { deploy?: boolean; query?: string; server?: string } = {}) =>
+  `/?sim=1&server=${encodeURIComponent(opts.server ?? SERVER)}${opts.deploy ? '' : '&deploy=skip'}${opts.query ? `&${opts.query}` : ''}`;
 
 export const PORTRAIT = { width: 390, height: 844 };
 export const LANDSCAPE = { width: 844, height: 390 };
@@ -34,20 +45,55 @@ declare global {
     __loonieStore?: { getState: () => Record<string, any> };
     __loonieZombies?: { latest: () => ZRow[] };
     __loonieTracking?: { pose: () => Pose; position: { origin: [number, number] | null } };
-    __loonieAR?: { items: { id: number; x: number; y: number; h: number; dist: number; aimed: boolean }[]; aim: number[] };
+    __loonieAR?: { items: { id: number; x: number; y: number; h: number; dist: number; aimed: boolean }[]; aim: number[]; threats: number[] };
   }
 }
 
-export async function phone(browser: Browser, name: string): Promise<Phone> {
+export async function phone(browser: Browser, name: string, opts: { deploy?: boolean; query?: string; server?: string } = {}): Promise<Phone> {
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
   page.on('pageerror', (e) => console.log(`[${name}] pageerror`, e.message));
   page.on('console', (m) => { if (m.type() === 'error') console.log(`[${name}] console.error`, m.text()); });
-  await page.goto(APP);
+  await page.goto(appUrl(opts));
   await expect(page.getByTestId('wordmark')).toBeVisible();
-  await page.getByTestId('name').fill(name);
+  if (name) await page.getByTestId('name').fill(name);
   return { ctx, page, name };
 }
+
+/** Everyone taps Ready, and the host's Start lights up. */
+export async function readyUp(squad: Phone[], host: Phone = squad[0]): Promise<void> {
+  for (const p of squad) await p.page.getByTestId('ready').click();
+  await expect(host.page.getByTestId('start')).toBeEnabled();
+}
+
+/** Ready up and start: the usual way out of the lobby. */
+export async function startMission(squad: Phone[], host: Phone = squad[0]): Promise<void> {
+  await readyUp(squad, host);
+  await host.page.getByTestId('start').click();
+}
+
+/** The host ends the mission for everyone from the mission menu. */
+export async function abortMission(host: Phone): Promise<void> {
+  await host.page.getByTestId('hud-menu').click();
+  await host.page.getByTestId('abort').click();
+  await host.page.getByTestId('abort-confirm').click();
+}
+
+/**
+ * A blaster on the network. It says hello, then sends button presses, as the
+ * ESP32 firmware does. Runs inside the page, which already has a WebSocket.
+ */
+export async function connectGun(page: Page, gunId: string): Promise<void> {
+  await page.evaluate(({ url, gunId }) => new Promise<void>((resolve, reject) => {
+    const ws = new WebSocket(url);
+    (window as unknown as { __gun?: WebSocket }).__gun = ws;
+    ws.onopen = () => { ws.send(JSON.stringify({ t: 'hello', gun_id: gunId })); resolve(); };
+    ws.onerror = () => reject(new Error('gun could not connect'));
+  }), { url: DEVICE, gunId });
+}
+export const gunButton = (page: Page, b: 'trigger' | 'reload', down: boolean) =>
+  page.evaluate(({ b, down }) => (window as unknown as { __gun: WebSocket }).__gun.send(JSON.stringify({ t: 'btn', b, down })), { b, down });
+export const dropGun = (page: Page) => page.evaluate(() => (window as unknown as { __gun: WebSocket }).__gun.close());
 
 /** Host creates a squad; returns the four-letter code. */
 export async function createSquad(host: Phone): Promise<string> {
@@ -163,9 +209,14 @@ export const me = (page: Page) => page.evaluate(() => {
 });
 
 export const hud = {
+  /** Own health as the HUD shows it: a whole percentage. */
   hp: async (page: Page) => parseInt((await page.getByTestId('hp').textContent()) ?? '', 10),
   ammo: async (page: Page) => parseInt((await page.getByTestId('ammo').textContent()) ?? '', 10),
-  kills: async (page: Page) => parseInt(((await page.getByTestId('kills').textContent()) ?? '').replace(/\D/g, ''), 10),
+  /** Kills are not on the HUD (they are on the results screen), so this reads the snapshot. */
+  kills: (page: Page) => page.evaluate(() => {
+    const s = window.__loonieStore!.getState();
+    return ((s.squad as any[]).find((p) => p.id === s.session?.playerId)?.k ?? 0) as number;
+  }),
   zombiesLeft: async (page: Page) => parseInt(((await page.getByTestId('zombies-left').textContent()) ?? '').replace(/\D/g, ''), 10),
   wave: async (page: Page) => parseInt(((await page.getByTestId('wave').textContent()) ?? '').replace(/\D/g, '') || '0', 10),
 };

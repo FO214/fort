@@ -1,10 +1,17 @@
-# LOONIE mobile
+# FortIRL mobile
 
 Expo / React Native client. The phone sits on a Nerf gun in landscape; the
 camera shows the room, zombies are drawn over it, and the crosshair in the
 middle of the screen is the gun sight.
 
 ## Run it on phones (Expo Go)
+
+The app is on **Expo SDK 58** (React Native 0.88), which is what the current
+Expo Go from the App Store and Play Store opens.
+
+**You need Node.js 22.13 or newer** (24.3+ and 26+ also work). On an older
+Node the dev server stops at startup with `URL.parse is not a function`.
+Check with `node --version`; get the LTS installer from nodejs.org.
 
 1. **Server.** On a laptop, from `../backend`:
    ```sh
@@ -18,13 +25,28 @@ middle of the screen is the gun sight.
    npx expo start
    ```
    Scan the QR with Expo Go on each phone (same Wi-Fi).
-3. On the menu, tap **Server** and set it to `ws://<laptop-ip>:8000/ws`.
-   It's remembered.
-4. One phone **creates** a squad; the others **join** with the four-letter
-   code. Pick a loadout, tap ready, host starts.
+3. On the menu, open **Settings → Advanced** and set the server address to
+   `ws://<laptop-ip>:8000/ws`. It's remembered.
+4. One phone **creates** a mission; the others **join** with the
+   four-character code. Pick a class, pair a gun if you have one, ready up.
+   The host picks the **mode** (Mission, or Endless: no helicopter, waves
+   until nobody is standing) and the map, and starts once everyone is ready.
+5. Each phone then walks through **deploy**: turn it sideways, mount it on
+   the blaster, wait for a position, count in.
 
 Camera and motion sensors need Expo Go (or https). A phone browser on plain
 http will not get them.
+
+If the mission screen does not turn sideways on an iPhone, switch off
+Portrait Orientation Lock in Control Centre. On iOS 27 the system can refuse
+an app's request to lock the screen (it does so under iPhone Mirroring), and
+the game then follows however the phone is held.
+
+**No newer Node yet?** The web build still works on Node 20, for a quick
+check in a phone browser without camera or compass:
+```sh
+npm run export:web && npx serve -s dist -l 8081
+```
 
 ## How the phone knows where things are
 
@@ -55,20 +77,74 @@ phone's pose to the server 8 times a second.
 ## Layout
 
 ```
-App.tsx               phase router: menu · join · lobby · playing · summary
-src/theme.ts          colour / spacing / type tokens (dark glass over camera)
+App.tsx               font loading, then the phase router: menu · join · lobby · playing · summary
+src/theme.ts          every design token: colour, type, spacing, radius, materials, motion, touch
+src/fonts.ts          Barlow Condensed, IBM Plex Sans, IBM Plex Mono
+src/brand/            the Formation insignia and the FORTIRL wordmark, as geometry and components
+src/assets/brand/     the same marks as SVG files (generated: npm run brand)
 src/store.ts          zustand store; handles every server message
 src/net/              WebSocket with token resume; wire types
 src/sensors/          native (expo-location, expo-sensors) · web · sim (tests)
-src/game/             position, orientation, steps, zombies, tracking
-src/ui/ZombieLayer    places sprites over the camera, works out the aim
-src/ui/ZombieSprite   what a zombie looks like — the one file to swap for real art
-src/ui/MapView        the building's floor plan: minimap (gun-up) and full screen (tap the minimap)
-src/ui/ObjectiveBar   helicopter direction → hold 1/2 → extraction bar
-src/ui/ReviveButton, ExtractHold, DownedOverlay   the mission's hold actions and downed states
-src/ui/               Glass kit, Reticle, FireButton, Radar, HealthBar, Squad, …
-src/screens/          Menu, Join, Lobby, Game, Summary
+src/game/             position, orientation, steps, zombies, tracking; identity, permissions,
+                      feedback (haptics + sound), format (how values are written on screen)
+src/screens/          MainMenu, JoinMission, Lobby, Deploy, Match, Results, Gallery
+src/overlays/         Knocked, RevivePrompt, Extraction, Dead, FullMap, HudMenu, Connection,
+                      Permission, Settings
+src/ui/               shared pieces. Portrait: Button, TextField, MissionCodeInput, Panel, Sheet,
+                      StatusChip, RosterRow, ClassCard, PairGunControl. HUD: HudPanel, Crosshair,
+                      HitMarker, ThreatMarker, SquadPanel, AmmoReadout, HudControls,
+                      ObjectiveBanner, Minimap, MapView, HoldAction. Both: Icon, T, ProgressBar,
+                      ProgressRing
+src/ui/ZombieLayer    places sprites over the camera, works out the aim, marks unseen zombies
+src/ui/ZombieSprite   what a zombie looks like: the one file to swap for real art
+assets/sounds/        audio cues (generated: npm run sounds)
 e2e/                  Playwright: logic tests + simulated phones
+```
+
+## The design system
+
+**BLACKSITE**: industrial typography, operational amber, a geometric
+insignia. Solid surfaces first; dark glass only on the HUD, where the camera
+has to stay visible.
+
+- **Tokens.** `src/theme.ts` is the only place a colour, a type size or a
+  spacing value is written down. Components read semantic names
+  (`colors.status.health`, `type.hudValue`, `space[4]`).
+- **Colour means one thing each.** Amber is the brand, the primary action and
+  the objective. Olive is health and readiness. Red is damage and danger.
+  Player colours identify a player and nothing else, and every one of them
+  comes with a shape and a slot number. Zombie types have their own cues.
+- **Never colour alone.** Ready is a word and a tick as well as olive; a
+  knocked teammate is a word and a cross as well as red; the selected class
+  says "Selected".
+- **Type.** Barlow Condensed for titles, banners and buttons; IBM Plex Sans
+  for labels and instructions; IBM Plex Mono for codes, ammo, distance and
+  timers. Nothing on the HUD is set below 12 pt.
+- **Over the camera.** Critical text sits on a dark plate, never straight on
+  the image. Plates are as light as contrast allows: the logic tests
+  composite each one over a pure white scene and check the text on it still
+  clears WCAG AA.
+- **Small screens lose detail, not legibility.** On a narrow or short screen
+  the HUD drops teammates' bars, then the wave label, then the minimap, and
+  shortens the objective's wording. The crosshair, own health, ammo, the
+  objective, threat cues and the hold actions never go, and the type is
+  never shrunk to make room.
+- **Motion** is short timed eases that say something changed. Nothing
+  bounces, and with the system's reduced-motion setting on, things simply
+  change.
+- **Sound and haptics** have separate switches (Settings, or the mission
+  menu), and neither is ever the only sign of an event.
+
+**The gallery** shows the whole system on one screen: palette, type,
+buttons, fields, progress, roster, class cards, pairing states, every icon,
+the four zombie types on light and dark, player identities, materials. Open
+it from Settings → Advanced → Design system, or `?gallery=1` on the web build.
+
+**What is drawn in code** and can be regenerated:
+
+```sh
+npm run brand        # src/assets/brand/*.svg and the app icons, from src/brand/geometry.ts
+npm run sounds       # assets/sounds/*.wav, synthesised placeholders
 ```
 
 ## Tests
@@ -90,8 +166,21 @@ them with step and GPS events, hold a QR code up to the camera, and press
 and hold the real on-screen buttons. One test plays a whole mission with
 four phones: knocked, revived, arrive, hold two waves, two extract while
 two defend.
-Screenshots of every screen land in `e2e/output/`. The "camera" in those
-screenshots is a drawn corridor (`e2e/fakeCamera.ts`).
+
+`e2e/ui.spec.ts` covers the screens around the mission: the menu's errors,
+the code field, the permission briefing (`?perm=ask` stands in for a phone
+that has not been asked), gun pairing against a simulated blaster on
+`/device` (window, timeout, paired, dropped, back), the deploy sequence, and
+the HUD at four device sizes and three HUD scales, where it checks that no
+critical piece overlaps another or leaves the screen. Tests skip the deploy
+sequence with `?deploy=skip` unless they are about it.
+
+The logic tests also check the design system itself: contrast for every
+semantic pairing, HUD plates over a white scene, type and touch minimums,
+and the brand geometry.
+
+Screenshots of every screen and state land in `e2e/output/`. The "camera"
+in those screenshots is a drawn corridor (`e2e/fakeCamera.ts`).
 
 ## The helicopter sign
 
@@ -111,6 +200,9 @@ what every map shipped so far expects.
   zombies drift sideways against the room as you turn, adjust it.
 - Step detection thresholds (`src/game/steps.ts`) with the phone on the gun.
 - How noisy GPS is in the building.
+- Blur on the HUD's glass panels (iOS and web blur; Android uses the opaque
+  fallback), and how the plates read over real rooms in daylight.
+- Haptic patterns and the loudness of the audio cues against each other.
 - Reading the helicopter QR code through the game camera. Tests simulate
   "code in view"; the real scan path (`onBarcodeScanned`) has not run on a
   device. Any QR whose text is `LOONIE:HELI` is the helicopter for now.

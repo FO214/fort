@@ -23,15 +23,20 @@ class GunClass(BaseModel):
     hp: int                  # the player's health with this loadout
 
 
+# Four loadouts, in the order the lobby shows them. Pistol, SMG and rifle
+# carry the numbers of the original regular / light / heavy classes; the
+# shotgun is the close-range option: wide aim forgiveness, short reach.
 CLASSES: dict[str, GunClass] = {
-    "light": GunClass(id="light", name="Light", damage=1, fire_interval_s=0.12, magazine=24,
-                      reload_s=2.2, spread_deg=3.0, range_m=25, automatic=True, hp=6),
-    "regular": GunClass(id="regular", name="Regular", damage=2, fire_interval_s=0.4, magazine=10,
-                        reload_s=2.6, spread_deg=2.0, range_m=35, automatic=False, hp=8),
-    "heavy": GunClass(id="heavy", name="Heavy", damage=4, fire_interval_s=0.9, magazine=5,
+    "pistol": GunClass(id="pistol", name="Pistol", damage=2, fire_interval_s=0.4, magazine=10,
+                       reload_s=2.6, spread_deg=2.0, range_m=35, automatic=False, hp=8),
+    "smg": GunClass(id="smg", name="SMG", damage=1, fire_interval_s=0.12, magazine=24,
+                    reload_s=2.2, spread_deg=3.0, range_m=25, automatic=True, hp=6),
+    "shotgun": GunClass(id="shotgun", name="Shotgun", damage=3, fire_interval_s=0.7, magazine=6,
+                        reload_s=3.0, spread_deg=5.0, range_m=12, automatic=False, hp=9),
+    "rifle": GunClass(id="rifle", name="Rifle", damage=4, fire_interval_s=0.9, magazine=5,
                       reload_s=3.4, spread_deg=1.0, range_m=50, automatic=False, hp=10),
 }
-DEFAULT_CLASS = "regular"
+DEFAULT_CLASS = "pistol"
 
 
 # --------------------------------------------------------------------- settings
@@ -42,9 +47,17 @@ def default_map() -> str:
     return os.environ.get("LOONIE_DEFAULT_MAP", "arena")
 
 
+# The two ways to play.
+#   mission  walk to the helicopter, hold it, extract
+#   endless  no helicopter and no way out: waves keep coming, each a little
+#            tougher than the last, until nobody is standing
+Mode = Literal["mission", "endless"]
+
+
 class Settings(BaseModel):
     max_players: int = Field(4, ge=1, le=4)
     map: str = Field(default_factory=default_map, pattern=r"^[a-z0-9_-]{1,32}$")
+    mode: Mode = "mission"
 
 
 # ----------------------------------------------------------- phone -> server
@@ -82,6 +95,12 @@ class SetMap(BaseModel):
     """Host only, in the lobby: which map the mission is played on."""
     t: Literal["set_map"]
     map: str = Field(pattern=r"^[a-z0-9_-]{1,32}$")
+
+
+class SetMode(BaseModel):
+    """Host only, in the lobby: mission or endless."""
+    t: Literal["set_mode"]
+    mode: Mode
 
 
 class Start(BaseModel):

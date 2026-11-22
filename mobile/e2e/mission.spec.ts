@@ -4,8 +4,8 @@
  */
 import { test, expect } from '@playwright/test';
 import {
-  LANDSCAPE, PORTRAIT, createSquad, faceNearest, fightUntil, holdDown, hud, intoMission, joinSquad, me, phone, place, release,
-  shot, showQr, walkTo, world,
+  LANDSCAPE, PORTRAIT, abortMission, createSquad, faceNearest, fightUntil, holdDown, hud, intoMission, joinSquad, me, phone, place,
+  release, shot, showQr, startMission, walkTo, world,
 } from './helpers';
 
 const WAVE_1 = 5;      // a four-player first wave under the e2e pacing in playwright.config.ts
@@ -25,12 +25,24 @@ test('four phones fight a wave together', async ({ browser }) => {
   for (const n of ['Ada', 'Bo', 'Cy', 'Di']) await expect(ada.page.getByTestId(`player-${n}`)).toBeVisible();
 
   // Loadouts and ready. The lobby already has a GPS fix.
-  await bo.page.getByTestId('class-light').click();
-  await di.page.getByTestId('class-heavy').click();
-  for (const p of [ada, bo, cy, di]) await p.page.getByTestId('ready').click();
-  await expect(ada.page.getByTestId('player-Bo')).toContainText('Light');
-  await expect(ada.page.getByTestId('player-Di')).toContainText('Heavy');
+  await bo.page.getByTestId('class-smg').click();
+  await di.page.getByTestId('class-rifle').click();
+  await expect(ada.page.getByTestId('player-Bo')).toContainText('SMG');
+  await expect(ada.page.getByTestId('player-Di')).toContainText('Rifle');
+  await expect(ada.page.getByTestId('class-pistol')).toHaveAttribute('aria-checked', 'true');      // the default, marked as selected
   await expect(ada.page.getByTestId('gps')).toContainText('GPS ±3 m');
+
+  // Start stays off, and says why, until everyone connected is ready.
+  await expect(ada.page.getByTestId('start')).toBeDisabled();
+  await expect(ada.page.getByTestId('start-why')).toContainText('Waiting for 4 players');
+  for (const p of [ada, bo, cy]) await p.page.getByTestId('ready').click();
+  await expect(ada.page.getByTestId('start')).toBeDisabled();
+  await expect(ada.page.getByTestId('start-why')).toContainText('Waiting for Di');
+  await expect(ada.page.getByTestId('player-Di')).toContainText('Not ready');
+  await shot(di.page, '03-lobby-guest-not-ready');
+  await di.page.getByTestId('ready').click();
+  await expect(ada.page.getByTestId('player-Di')).toContainText('Ready');
+  await expect(ada.page.getByTestId('start')).toBeEnabled();
   await shot(ada.page, '03-lobby-host');
   await cy.page.setViewportSize(LANDSCAPE);                 // a phone already on its gun
   await shot(cy.page, '03-lobby-guest-landscape');
@@ -90,18 +102,29 @@ test('four phones fight a wave together', async ({ browser }) => {
   await cy.page.waitForTimeout(150);
   await shot(cy.page, '07-game-zombies-close');
 
-  // The whole squad opens fire until the wave is down.
-  const cleared = async () => (await hud.zombiesLeft(ada.page)) === 0;
+  // Turn her back on them: a zombie in reach but out of view is marked on the edge of the screen it is on.
+  const behind = (await world(cy.page)).zombies[0];
+  await cy.page.evaluate((b) => window.__loonieSim!.aim(b + 110), behind.bearing);
+  await expect(cy.page.getByTestId('threat-left').first()).toBeVisible();
+  await shot(cy.page, '07-game-threat-markers');
+
+  // The whole squad opens fire until the wave is down. The banner says so, briefly.
+  // Seeing the banner also counts as "cleared": the zombie count is only zero for
+  // the short rest before the next wave, which a slow loop can miss.
+  let waveDown = false;
+  const sawCleared = expect(ada.page.getByTestId('banner')).toContainText('Wave 1 cleared', { timeout: 60_000 })
+    .then(() => { waveDown = true; });
+  const cleared = async () => waveDown || (await hud.zombiesLeft(ada.page)) === 0;
   await Promise.all([
     fightUntil(ada.page, cleared),
     fightUntil(bo.page, cleared, { everyMs: 130 }),           // Light: fast and weak
     fightUntil(cy.page, cleared),
     fightUntil(di.page, cleared, { everyMs: 850 }),           // Heavy: slow and strong
   ]);
-  await expect(ada.page.getByTestId('feed')).toContainText('Wave 1');
-  await expect(ada.page.getByTestId('feed')).toContainText('cleared');
+  await sawCleared;
+  // Every kill is credited to someone. (The next wave may already have lost a zombie or two.)
   const kills = await Promise.all(squad.map((p) => hud.kills(p.page)));
-  expect(kills.reduce((a, b) => a + b, 0)).toBe(WAVE_1);
+  expect(kills.reduce((a, b) => a + b, 0)).toBeGreaterThanOrEqual(WAVE_1);
   await shot(ada.page, '08-game-wave-cleared');
 
   // Reload from the HUD.
@@ -111,9 +134,15 @@ test('four phones fight a wave together', async ({ browser }) => {
   await expect(ada.page.getByTestId('ammo-panel')).toContainText('Reloading');
   await expect.poll(() => hud.ammo(ada.page), { timeout: 6_000 }).toBe(10);
 
-  // Host aborts: everyone is back in the lobby.
+  // The mission menu. Only the host can end the mission for everyone, and it asks twice.
+  await bo.page.getByTestId('hud-menu').click();
+  await expect(bo.page.getByTestId('leave')).toBeVisible();
   await expect(bo.page.getByTestId('abort')).toHaveCount(0);
+  await bo.page.getByTestId('sheet-close').click();
+  await ada.page.getByTestId('hud-menu').click();
+  await shot(ada.page, '08-mission-menu');
   await ada.page.getByTestId('abort').click();
+  await shot(ada.page, '08-abort-confirm');
   await ada.page.getByTestId('abort-confirm').click();
   for (const p of squad) await expect(p.page.getByTestId('roster')).toBeVisible();
   await shot(ada.page, '09-lobby-after-abort-landscape');
@@ -130,8 +159,8 @@ test('full mission: knocked and revived, reach the helicopter, hold, two extract
   const di = await phone(browser, 'Di');
   for (const p of [bo, cy, di]) await joinSquad(p, code);
   await expect(ada.page.getByTestId('player-Di')).toBeVisible();
-  await ada.page.getByTestId('start').click();
   const squad = [ada, bo, cy, di];
+  await startMission(squad);
   for (const p of squad) await intoMission(p);
 
   // ---- Journey. Three stay together; Di wanders off alone and does not shoot.
@@ -139,11 +168,13 @@ test('full mission: knocked and revived, reach the helicopter, hold, two extract
   await place(bo.page, 3, 0);
   await place(cy.page, 0, 3);
   await place(di.page, 18, -18);
-  await expect(ada.page.getByTestId('objective')).toContainText('Helicopter');
+  await expect(ada.page.getByTestId('objective')).toContainText('Reach the helicopter');
   await expect(ada.page.getByTestId('heli-dist')).toHaveText('30 m');            // it is 30 m north of the start
   await expect(di.page.getByTestId('heli-dist')).toHaveText('51 m');
-  await expect(ada.page.getByTestId('arrived')).toBeVisible();                   // host's "We're here"
-  await expect(bo.page.getByTestId('arrived')).toHaveCount(0);
+  await expect(ada.page.getByTestId('arrived')).toHaveCount(0);                  // "We're here" waits until the host is close
+  await ada.page.getByTestId('hud-menu').click();                                // ...but is always in the host's mission menu
+  await expect(ada.page.getByTestId('arrived-menu')).toBeVisible();
+  await ada.page.getByTestId('sheet-close').click();
   await shot(ada.page, '10-journey-objective');
 
   const diDown = () => di.page.getByTestId('knocked').isVisible();
@@ -152,20 +183,19 @@ test('full mission: knocked and revived, reach the helicopter, hold, two extract
     fightUntil(bo.page, diDown, { want: 'mine', everyMs: 420, timeoutMs: 90_000 }),
     fightUntil(cy.page, diDown, { want: 'mine', everyMs: 440, timeoutMs: 90_000 }),
     (async () => {
-      await expect.poll(() => hud.hp(di.page), { timeout: 60_000, intervals: [50] }).toBeLessThan(8);
+      await expect.poll(() => hud.hp(di.page), { timeout: 60_000, intervals: [50] }).toBeLessThan(100);
       await shot(di.page, '11-bitten');                                           // red flash + direction wedge
     })(),
   ]);
 
   // ---- Di is knocked: she cannot shoot and her bleed-out bar is showing.
   await expect(di.page.getByTestId('hp')).toHaveText(/^0/);
-  await expect(di.page.getByTestId('knocked-status')).toContainText('teammate must clear');
-  await expect(ada.page.getByTestId('mate-Di')).toContainText('down');
+  await expect(di.page.getByTestId('knocked-status')).toContainText('Teammate coming');    // and who, and how far
+  await expect(di.page.getByTestId('bleed')).toContainText('%');
+  await expect(ada.page.getByTestId('mate-Di')).toContainText('Knocked');
   await expect(ada.page.getByTestId('revive')).toHaveCount(0);                   // too far away to help from here
-  const ammo = await hud.ammo(di.page);
-  await di.page.getByTestId('fire').click({ force: true });
-  await di.page.waitForTimeout(250);
-  expect(await hud.ammo(di.page)).toBe(ammo);
+  await expect(di.page.getByTestId('fire')).toHaveCount(0);                      // no weapon controls while down
+  await expect(di.page.getByTestId('squad')).toBeVisible();                      // but the squad stays in view
   await shot(di.page, '12-knocked');
 
   // ---- Rescue. Bo and Cy run over and shoot the zombies off her; Ada walks in and holds Revive.
@@ -179,14 +209,17 @@ test('full mission: knocked and revived, reach the helicopter, hold, two extract
   await walkTo(ada.page, 16, -16);
   await expect(ada.page.getByTestId('revive')).toContainText('Hold to revive Di');
   await holdDown(ada.page, 'revive');
-  await expect(ada.page.getByTestId('revive')).toContainText('Reviving Di');
+  // Held: either it is filling, or it says exactly why it is not.
+  await expect(ada.page.getByTestId('revive')).toContainText(/Reviving Di|Clear the zombies first/);
   await expect(di.page.getByTestId('knocked-status')).toContainText('Ada is reviving you', { timeout: 15_000 });
   await shot(di.page, '13-being-revived');
   await shot(ada.page, '13-reviving');
   await expect(di.page.getByTestId('knocked')).toHaveCount(0, { timeout: 30_000 });
   await release(ada.page);
   await cover;
-  await expect(di.page.getByTestId('hp')).toHaveText(/^[1-4]\//);                // back at half health or less
+  const back = await hud.hp(di.page);                                            // back at half health or less
+  expect(back).toBeGreaterThan(0);
+  expect(back).toBeLessThanOrEqual(50);
   await expect(ada.page.getByTestId('feed')).toContainText('revived Di');
   await expect(ada.page.getByTestId('revive')).toHaveCount(0);
 
@@ -196,12 +229,16 @@ test('full mission: knocked and revived, reach the helicopter, hold, two extract
   await place(di.page, 0, 13);
   await place(ada.page, 0, 14);
   await ada.page.waitForTimeout(400);
-  await expect(ada.page.getByTestId('objective')).toContainText('Helicopter');   // 16 m out: not there yet
+  await expect(ada.page.getByTestId('objective')).toContainText('Reach the helicopter');   // 16 m out: not there yet
   await expect(ada.page.getByTestId('heli-dist')).toHaveText('16 m');
+  await expect(ada.page.getByTestId('arrived')).toBeVisible();                   // close enough: the host is offered "We're here"
+  await expect(bo.page.getByTestId('arrived')).toHaveCount(0);
+  const sawArrival = expect(ada.page.getByTestId('banner')).toContainText('Helicopter reached', { timeout: 30_000 });
   await walkTo(ada.page, 0, 27);
-  for (const p of squad) await expect(p.page.getByTestId('objective')).toContainText('Hold the helicopter');
+  for (const p of squad) await expect(p.page.getByTestId('objective')).toContainText('Hold the zone');
+  await expect(ada.page.getByTestId('hold-count')).toHaveText('Wave 1 of 2');
   await expect(ada.page.getByTestId('arrived')).toHaveCount(0);
-  await expect(ada.page.getByTestId('feed')).toContainText('Helicopter reached');
+  await sawArrival;
   await shot(ada.page, '14-holdout');
 
   // ---- Holdout: two waves, then the final wave.
@@ -212,8 +249,8 @@ test('full mission: knocked and revived, reach the helicopter, hold, two extract
     fightUntil(cy.page, finalWave, { everyMs: 420, timeoutMs: 90_000 }),
     fightUntil(di.page, finalWave, { everyMs: 440, timeoutMs: 90_000 }),
   ]);
-  for (const p of squad) await expect(p.page.getByTestId('objective')).toContainText('Final wave');
-  await expect(ada.page.getByTestId('extract-holders')).toHaveText('0/2 holding');
+  for (const p of squad) await expect(p.page.getByTestId('objective')).toContainText('Extract now');
+  await expect(ada.page.getByTestId('extract-holders')).toContainText('0 of 2 holding');
 
   // ---- Extraction. Cy and Di defend from here on.
   let out = false;
@@ -226,7 +263,7 @@ test('full mission: knocked and revived, reach the helicopter, hold, two extract
     // No code in view: nothing to hold. The wrong code does not count either.
     await expect(ada.page.getByTestId('extract-aim')).toBeVisible();
     await showQr(ada.page, 'SOME-OTHER-CODE');
-    await ada.page.waitForTimeout(500);
+    await expect(ada.page.getByTestId('extract-wrong')).toContainText('not the helicopter code');
     await expect(ada.page.getByTestId('extract-hold')).toHaveCount(0);
     await shot(ada.page, '15-final-aim-at-code');
 
@@ -234,8 +271,8 @@ test('full mission: knocked and revived, reach the helicopter, hold, two extract
     await showQr(ada.page, 'LOONIE:HELI');
     await expect(ada.page.getByTestId('extract-hold')).toContainText('Hold to extract');
     await holdDown(ada.page, 'extract-hold');
-    await expect(bo.page.getByTestId('extract-holders')).toHaveText('1/2 holding');
-    await expect(ada.page.getByTestId('extract-hold')).toContainText('Waiting for 1 more');
+    await expect(bo.page.getByTestId('extract-holders')).toContainText('1 of 2 holding. Need one more.');
+    await expect(ada.page.getByTestId('extract-hold')).toContainText('Need one more');
     await ada.page.waitForTimeout(1200);
     await expect(ada.page.getByTestId('extract-bar')).toHaveAttribute('aria-label', 'extraction 0 percent');
     await shot(ada.page, '16-final-one-holding');
@@ -243,7 +280,7 @@ test('full mission: knocked and revived, reach the helicopter, hold, two extract
     // Bo joins her on the code: the bar fills and they are out.
     await showQr(bo.page, 'LOONIE:HELI');
     await holdDown(bo.page, 'extract-hold');
-    await expect(cy.page.getByTestId('extract-holders')).toHaveText('2/2 holding');
+    await expect(cy.page.getByTestId('extract-holders')).toContainText('2 of 2 holding');
     await expect(cy.page.getByTestId('objective')).toContainText('Cover them');
     await shot(cy.page, '17-final-defending');
     await shot(bo.page, '17-final-extracting');
@@ -256,8 +293,11 @@ test('full mission: knocked and revived, reach the helicopter, hold, two extract
   }
 
   // ---- Summary.
-  await expect(ada.page.getByTestId('result-Ada')).toContainText('1 revive');
-  await expect(cy.page.getByTestId('result-Di')).toContainText('extracted');
+  await expect(ada.page.getByTestId('revives-Ada')).toHaveText('1');
+  await expect(ada.page.getByTestId('knocks-Di')).toHaveText('1');
+  await expect(cy.page.getByTestId('fate-Di')).toHaveText('Extracted');
+  await expect(cy.page.getByTestId('waiting-host')).toBeVisible();               // only the host can run it again
+  await expect(cy.page.getByTestId('again')).toHaveCount(0);
   await shot(ada.page, '18-summary-extracted-landscape');
   await cy.page.setViewportSize(PORTRAIT);
   await shot(cy.page, '18-summary-extracted-portrait');
@@ -274,7 +314,7 @@ test('nobody helps: a knocked player bleeds out and dies; the last one falling i
   const bo = await phone(browser, 'Bo');
   await joinSquad(bo, code);
   await expect(ada.page.getByTestId('player-Bo')).toBeVisible();
-  await ada.page.getByTestId('start').click();
+  await startMission([ada, bo]);
   for (const p of [ada, bo]) await intoMission(p);
   await place(ada.page, 0, 0);
   await place(bo.page, 22, 0);                                  // too far apart to revive each other
@@ -283,15 +323,20 @@ test('nobody helps: a knocked player bleeds out and dies; the last one falling i
   const adaDead = () => ada.page.getByTestId('dead').isVisible();
   await fightUntil(bo.page, adaDead, { want: 'mine', timeoutMs: 150_000 });
   await expect(ada.page.getByTestId('hp')).toHaveText(/^0/);
+  await expect(ada.page.getByTestId('dead')).toContainText("You're out");
+  await expect(ada.page.getByTestId('fire')).toHaveCount(0);            // nothing to shoot or revive with
   await shot(ada.page, '19-dead');
-  await expect(bo.page.getByTestId('mate-Ada')).toContainText('dead');
+  await ada.page.getByTestId('spectate').click();                       // fold it away and watch
+  await expect(ada.page.getByTestId('dead')).toContainText('Spectating');
+  await shot(ada.page, '19-spectating');
+  await expect(bo.page.getByTestId('mate-Ada')).toContainText('Dead');
   await expect(bo.page.getByTestId('feed')).toContainText('Ada');
   await shot(bo.page, '19-teammate-dead');
 
   // Bo stops fighting. With nobody standing the mission is lost.
   for (const p of [ada, bo]) await expect(p.page.getByTestId('outcome')).toContainText('Squad wiped', { timeout: 90_000 });
-  await expect(bo.page.getByTestId('result-Ada')).toContainText('dead');
-  await expect(bo.page.getByTestId('result-Bo')).toContainText('knocked');
+  await expect(bo.page.getByTestId('fate-Ada')).toHaveText('Dead');
+  await expect(bo.page.getByTestId('fate-Bo')).toHaveText('Knocked');
   await expect(ada.page.getByTestId('again')).toBeVisible();
   await expect(bo.page.getByTestId('again')).toHaveCount(0);
   await shot(bo.page, '20-summary-wiped-landscape');
@@ -317,7 +362,7 @@ test('a real building: host picks the map, zombies keep to the floor plan, the m
   await expect(bo.page.getByTestId('map-name')).toContainText('Schmeichel');
   await shot(ada.page, '21-lobby-map-picker');
 
-  await ada.page.getByTestId('start').click();
+  await startMission([ada, bo]);
   for (const p of [ada, bo]) await intoMission(p);
   // Until GPS puts them at the building (the simulator starts 100 km away) the HUD says so.
   await expect(ada.page.getByTestId('hint')).toContainText('not at Schmeichel');
@@ -362,17 +407,79 @@ test('a real building: host picks the map, zombies keep to the floor plan, the m
   await ada.page.getByTestId('fullmap-close').click();
   await expect(ada.page.getByTestId('fullmap')).toHaveCount(0);
 
-  await ada.page.getByTestId('abort').click();
-  await ada.page.getByTestId('abort-confirm').click();
+  await abortMission(ada);
   for (const p of [ada, bo]) await expect(p.page.getByTestId('roster')).toBeVisible();
   await expect(bo.page.getByTestId('map-name')).toContainText('Schmeichel');     // the choice survives a run
+  for (const p of [ada, bo]) await p.ctx.close();
+});
+
+test('endless mode: the host picks it, waves keep coming with no helicopter, and it ends when nobody is standing', async ({ browser }) => {
+  test.setTimeout(180_000);
+  const ada = await phone(browser, 'Ada');
+  const code = await createSquad(ada);
+  const bo = await phone(browser, 'Bo');
+  await joinSquad(bo, code);
+
+  // The mission is the default. Only the host can change it, and everyone sees the choice.
+  await expect(bo.page.getByTestId('mode-chip')).toContainText('Mission');
+  await expect(bo.page.getByTestId('mode-endless')).toHaveCount(0);
+  await ada.page.getByTestId('mode-endless').click();
+  await expect(ada.page.getByTestId('mode-endless')).toHaveAttribute('aria-checked', 'true');
+  await expect(bo.page.getByTestId('mode-chip')).toContainText('Endless');
+  await expect(bo.page.getByTestId('mode-line')).toContainText('No helicopter');
+  await shot(ada.page, '25-lobby-endless');
+  await shot(bo.page, '25-lobby-endless-guest');
+
+  await startMission([ada, bo]);
+  for (const p of [ada, bo]) await intoMission(p);
+  await place(ada.page, 0, 0);
+  await place(bo.page, 3, 0);
+
+  // The objective is to survive: a clock, and no helicopter anywhere.
+  await expect(ada.page.getByTestId('objective')).toContainText('Survive');
+  await expect(ada.page.getByTestId('endless-time')).toHaveText(/^\d+:\d\d$/);
+  await expect(ada.page.getByTestId('heli-dist')).toHaveCount(0);
+  await expect(ada.page.getByTestId('arrived')).toHaveCount(0);
+  await ada.page.getByTestId('hud-menu').click();
+  await expect(ada.page.getByTestId('arrived-menu')).toHaveCount(0);
+  await ada.page.getByTestId('sheet-close').click();
+  // Standing where the helicopter would be changes nothing.
+  await place(ada.page, 0, 30);
+  await ada.page.waitForTimeout(700);
+  await expect(ada.page.getByTestId('objective')).toContainText('Survive');
+  await place(ada.page, 0, 0);
+
+  // Wave after wave: clear one and the next arrives, with no end to them.
+  await expect.poll(() => hud.wave(ada.page), { timeout: 20_000 }).toBe(1);
+  await shot(ada.page, '26-endless-hud');
+  const wave3 = async () => (await hud.wave(ada.page)) >= 3;
+  await Promise.all([
+    fightUntil(ada.page, wave3, { timeoutMs: 90_000 }),
+    fightUntil(bo.page, wave3, { everyMs: 400, timeoutMs: 90_000 }),
+  ]);
+  for (const p of [ada, bo]) await expect(p.page.getByTestId('objective')).toContainText('Survive');
+  expect(await hud.wave(bo.page)).toBeGreaterThanOrEqual(3);
+  await shot(ada.page, '26-endless-wave-3');
+
+  // They stop fighting. The only way an endless run ends.
+  for (const p of [ada, bo]) await expect(p.page.getByTestId('outcome')).toContainText('Squad wiped', { timeout: 90_000 });
+  await expect(ada.page.getByTestId('outcome-line')).toContainText(/You reached wave \d+ and lasted \d+:\d\d/);
+  await expect(ada.page.getByTestId('mission-id')).toContainText('ENDLESS');
+  await expect(ada.page.getByTestId('endless-best')).toContainText('New best on this phone: wave');
+  expect(parseInt((await ada.page.getByTestId('sum-wave').textContent()) ?? '0', 10)).toBeGreaterThanOrEqual(3);
+  await ada.page.setViewportSize(PORTRAIT);
+  await shot(ada.page, '27-endless-results');
+
+  // Play again keeps the mode.
+  await ada.page.getByTestId('again').click();
+  for (const p of [ada, bo]) await expect(p.page.getByTestId('mode-chip')).toContainText('Endless');
   for (const p of [ada, bo]) await p.ctx.close();
 });
 
 test('a phone that reloads the page mid-mission drops back into it', async ({ browser }) => {
   const ada = await phone(browser, 'Ada');
   await createSquad(ada);
-  await ada.page.getByTestId('start').click();
+  await startMission([ada]);
   await intoMission(ada);
   await place(ada.page, 0, 0);
   await expect.poll(() => hud.wave(ada.page), { timeout: 15_000 }).toBe(1);

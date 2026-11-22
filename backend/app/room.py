@@ -158,6 +158,16 @@ class Room:
         self.settings = self.settings.model_copy(update={"map": map_id})
         self.world = World(self.map.nav)
 
+    def set_mode(self, pid: str, mode: str) -> None:
+        """Host picks how the run is played: the mission, or endless waves."""
+        if pid != self.host_id:
+            raise GameError("Only the host can change the mode")
+        if self.phase != "lobby":
+            raise GameError("The mode locks when the mission starts")
+        if mode not in ("mission", "endless"):
+            raise GameError("Unknown mode")
+        self.settings = self.settings.model_copy(update={"mode": mode})
+
     def start(self, pid: str, now: float, lat: Optional[float] = None,
               lon: Optional[float] = None) -> Event:
         if pid != self.host_id:
@@ -169,7 +179,8 @@ class Room:
             game_map = game_map.with_origin(lat, lon)
         self.map = game_map
         self.world = World(game_map.nav)
-        self.mission = Mission(self.world, game_map, self.tuning, len(self.players), now, self.rng)
+        self.mission = Mission(self.world, game_map, self.tuning, len(self.players), now, self.rng,
+                               mode=self.settings.mode)
         self.phase = "playing"
         self.started_at = self.last_tick = now
         self.ended = None
@@ -185,8 +196,9 @@ class Room:
 
     def started_event(self, now: float) -> Event:
         assert self.mission is not None
-        return {"t": "started", "now": now, "map": self.map.public(),
-                "mission": self.mission.state()}
+        # `at` is when the run began, so a phone that reconnects can still show how long it has lasted.
+        return {"t": "started", "now": now, "at": self.started_at, "mode": self.settings.mode,
+                "map": self.map.public(), "mission": self.mission.state()}
 
     def reset(self, pid: str) -> None:
         """Back to the lobby. Mid-mission this aborts the run."""
@@ -498,7 +510,7 @@ class Room:
         for p in self.players.values():
             p.reviving, p.revive_by, p.revive_progress, p.extracting = None, None, 0.0, False
         self.ended = {
-            "t": "ended", "outcome": outcome,
+            "t": "ended", "outcome": outcome, "mode": self.settings.mode,
             "results": [{"id": p.id, "name": p.name, "cls": p.cls, "kills": p.kills,
                          "damage": p.damage, "shots": p.shots, "state": p.state,
                          "knocks": p.knocks, "revives": p.revives}

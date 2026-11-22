@@ -1,15 +1,23 @@
 import React from 'react';
-import { Text, TextProps, TextStyle } from 'react-native';
-import { color, font, type } from '../theme';
+import { StyleProp, Text, TextProps, TextStyle } from 'react-native';
+import { colors, type, type TypeVariant } from '../theme';
 
-type Variant = keyof typeof type;
-
-export function T({ v = 'body', c = color.ink, style, children, ...rest }:
-  TextProps & { v?: Variant; c?: string; style?: TextStyle | TextStyle[] }) {
-  const base = type[v];
-  const isMono = v === 'mono' || v === 'monoBig';
+/**
+ * All text in the app. `v` picks a step of the type scale, `c` a colour
+ * token. Weight comes from the font file each step names, never from
+ * `fontWeight`, so every platform draws the same face.
+ *
+ * Strings stay in normal case in the source; steps that are set in capitals
+ * transform them, so screen readers still hear words.
+ *
+ * Portrait text follows the system text size, up to a point. HUD steps do
+ * not: the HUD has its own scale setting, tuned to the landscape layout.
+ */
+export function T({ v = 'body', c = colors.textPrimary, center, style, children, ...rest }:
+  TextProps & { v?: TypeVariant; c?: string; center?: boolean; style?: StyleProp<TextStyle> }) {
   return (
-    <Text {...rest} style={[{ fontFamily: isMono ? font.mono : font.family, color: c }, base as TextStyle, style]}>
+    <Text allowFontScaling={!v.startsWith('hud')} maxFontSizeMultiplier={1.3} {...rest}
+      style={[type[v] as TextStyle, { color: c }, center && { textAlign: 'center' }, style]}>
       {children}
     </Text>
   );
