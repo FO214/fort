@@ -376,7 +376,10 @@ export const useStore = create<State>((set, get) => ({
       const raw = await AsyncStorage.getItem(KEY);
       if (!raw) return;
       const p = JSON.parse(raw) as { name?: string; serverUrl?: string; session?: Session | null; prefs?: Partial<Prefs> };
-      const pinned = typeof window !== 'undefined' && !!window.location?.search && new URLSearchParams(window.location.search).has('server');
+      // A build that names its server means it: the address this phone remembers
+      // from an earlier build may belong to nothing now (the laptop moved).
+      const pinned = !!process.env.EXPO_PUBLIC_SERVER_URL
+        || (typeof window !== 'undefined' && !!window.location?.search && new URLSearchParams(window.location.search).has('server'));
       set({ name: p.name ?? '', serverUrl: pinned ? get().serverUrl : p.serverUrl ?? get().serverUrl });
       if (p.prefs) set({ prefs: { ...DEFAULT_PREFS, ...p.prefs } });
       if (p.session) set({ session: p.session });

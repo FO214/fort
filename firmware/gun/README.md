@@ -61,8 +61,16 @@ screen open while the gun joins (the iPhone only advertises itself there).
 Once joined it stays joined.
 
 The Mac may take only IPv6 on an iPhone hotspot. Give it a manual IPv4
-address for that network (e.g. 172.20.10.5, mask 255.255.255.240, router
-172.20.10.1), or guns can't reach it.
+address for that network, or guns and phones can't reach it:
+
+```sh
+sudo networksetup -setmanual Wi-Fi 172.20.10.14 255.255.255.240 172.20.10.1
+```
+
+Use .14, the last address in the range. The iPhone hands out addresses from
+.2 upwards, so a low manual address (we used .5) gets given to the next
+device that joins (for us, a gun); macOS then drops it as "address in use"
+and nothing can reach the Mac.
 
 ## Pair
 
