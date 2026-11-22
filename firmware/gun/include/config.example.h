@@ -1,17 +1,16 @@
-// Copy to config.h and fill in. config.h is gitignored.
+// Optional. Copy to config.h only to override something; the firmware builds without it.
+// config.h is gitignored.
 #pragma once
 
-#define WIFI_SSID   "your-2.4GHz-wifi-name"
-#define WIFI_PASS   "your-wifi-password"
+// Development shortcut: a Wi-Fi network to use on first boot, so you can skip the
+// setup page. It is saved on the gun like a setup-page save. Players don't need this.
+// #define WIFI_SSID   "your-2.4GHz-wifi-name"
+// #define WIFI_PASS   "your-wifi-password"
 
-// The laptop running the backend (same Wi-Fi). Its IP changes between networks.
-#define SERVER_HOST "172.20.10.5"
-#define SERVER_PORT 8000
+// Port used when a server typed into the setup page has no ":port".
+// #define SERVER_PORT 8000
 
-// Button wiring: one leg to the GPIO, the other leg to GND.
-#define PIN_TRIGGER 4
-#define PIN_RELOAD  9
-
-// The board has one GND hole. This pin is held low so it works as a second GND:
-// the reload button goes between PIN_RELOAD and this pin. Comment out to use GND.
-#define PIN_RELOAD_GND 13
+// Button wiring (defaults shown): one leg to the GPIO, the other leg to GND.
+// #define PIN_TRIGGER 4
+// #define PIN_RELOAD  9
+// #define PIN_RELOAD_GND 13   // held low so it works as a second GND for the reload button

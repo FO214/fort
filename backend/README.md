@@ -15,6 +15,9 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 ```
 
 Phones on the same Wi-Fi reach it at `ws://<your-laptop-ip>:8000/ws`.
+Guns find it by themselves: the server answers `LOONIE?` broadcasts on UDP 8001
+(`app/discovery.py`). Set `LOONIE_PORT` if uvicorn isn't on 8000, and
+`LOONIE_DISCOVERY_PORT` to move the UDP port.
 
 ## Layout
 
