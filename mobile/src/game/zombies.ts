@@ -11,8 +11,8 @@
  *
  * Pure logic: no React, no sensors.
  */
-import type { GunClass, ZombieRow } from '../net/types';
-import { angleDiffDeg, bearingXY, deg, rad } from './geo';
+import { Z_CHASE, type GunClass, type ZombieRow } from '../net/types';
+import { angleDiffDeg, bearingXY, deg, norm360, rad } from './geo';
 
 export const INTERP_DELAY_S = 0.1;
 export const EYE_M = 1.4;                 // height the gun is held at
@@ -20,7 +20,10 @@ export const ZOMBIE_HEIGHT_M = 1.8;
 export const ZOMBIE_HALF_WIDTH_M = 0.35;
 export const CAMERA_HFOV_DEG = 66;        // phone main camera, landscape, filling the screen
 const AIM_VERTICAL_PAD_DEG = 4;
-const DEATH_FX_S = 0.6;
+/** How long a shot zombie takes to fall and fade. */
+export const DEATH_FX_S = 0.75;
+/** A zombie has to move this far between snapshots for its heading to be believed. */
+const MOVED_M = 0.04;
 const KEEP_SNAPSHOTS = 8;
 
 export interface ZView {
@@ -30,9 +33,17 @@ export interface ZView {
   age: number;
   /** Seconds since it was last shot (for the hit flash), Infinity if never. */
   hitAge: number;
+  /** Map heading it is walking along, for drawing it from the right side. Null until it has been seen to move. */
+  heading: number | null;
 }
 
-export interface Corpse { id: number; type: number; x: number; y: number; age: number }
+export interface Corpse {
+  id: number; type: number; x: number; y: number;
+  /** How far through dying it is, 0 to 1. */
+  age: number;
+  /** The way it was facing when it was shot. */
+  heading: number | null;
+}
 
 interface Snap { t: number; rows: Map<number, ZombieRow> }
 
@@ -41,18 +52,27 @@ export class ZombieBuffer {
   private maxHp = new Map<number, number>();
   private firstSeen = new Map<number, number>();
   private hitAt = new Map<number, number>();
-  private corpses: { id: number; type: number; x: number; y: number; at: number }[] = [];
+  private heading = new Map<number, number>();
+  private corpses: { id: number; type: number; x: number; y: number; at: number; heading: number | null }[] = [];
 
   push(t: number, rows: ZombieRow[]): void {
     const map = new Map<number, ZombieRow>();
+    const before = this.snaps[this.snaps.length - 1]?.rows;
     for (const r of rows) {
       map.set(r[0], r);
       if (!this.firstSeen.has(r[0])) { this.firstSeen.set(r[0], t); this.maxHp.set(r[0], r[4]); }
+      // Which way it is walking. Only while it chases: a zombie that has
+      // stopped to bite gets jostled by the crowd, and that is not a turn.
+      const was = before?.get(r[0]);
+      if (was && r[5] === Z_CHASE && Math.hypot(r[2] - was[2], r[3] - was[3]) >= MOVED_M) {
+        const to = bearingXY(was[2], was[3], r[2], r[3]), from = this.heading.get(r[0]);
+        this.heading.set(r[0], from == null ? to : norm360(from + angleDiffDeg(to, from) * 0.6));
+      }
     }
     this.snaps.push({ t, rows: map });
     if (this.snaps.length > KEEP_SNAPSHOTS) this.snaps.shift();
     for (const id of [...this.firstSeen.keys()]) {
-      if (!this.snaps.some((s) => s.rows.has(id))) { this.firstSeen.delete(id); this.maxHp.delete(id); this.hitAt.delete(id); }
+      if (!this.snaps.some((s) => s.rows.has(id))) { this.firstSeen.delete(id); this.maxHp.delete(id); this.hitAt.delete(id); this.heading.delete(id); }
     }
   }
 
@@ -60,14 +80,14 @@ export class ZombieBuffer {
 
   onKill(id: number, x: number, y: number, t: number): void {
     const type = this.latestRow(id)?.[1] ?? 0;
-    this.corpses.push({ id, type, x, y, at: t });
+    this.corpses.push({ id, type, x, y, at: t, heading: this.heading.get(id) ?? null });
     // Stop drawing it the moment the server says it is dead, not 100 ms later.
     for (const s of this.snaps) s.rows.delete(id);
   }
 
   clear(): void {
     this.snaps = []; this.corpses = [];
-    this.maxHp.clear(); this.firstSeen.clear(); this.hitAt.clear();
+    this.maxHp.clear(); this.firstSeen.clear(); this.hitAt.clear(); this.heading.clear();
   }
 
   /** Zombies in the newest snapshot, uninterpolated. */
@@ -100,15 +120,16 @@ export class ZombieBuffer {
         hp: rb[4], maxHp: this.maxHp.get(id) ?? rb[4], state: rb[5], target: rb[6],
         age: Math.max(0, now - (this.firstSeen.get(id) ?? now)),
         hitAge: this.hitAt.has(id) ? Math.max(0, now - this.hitAt.get(id)!) : Infinity,
+        heading: this.heading.get(id) ?? null,
       });
     }
     return out;
   }
 
-  /** Zombies that died a moment ago, for the collapse effect. */
+  /** Zombies that died a moment ago, for the fall. */
   dying(now: number): Corpse[] {
     this.corpses = this.corpses.filter((c) => now - c.at < DEATH_FX_S);
-    return this.corpses.map((c) => ({ id: c.id, type: c.type, x: c.x, y: c.y, age: Math.max(0, now - c.at) / DEATH_FX_S }));
+    return this.corpses.map((c) => ({ id: c.id, type: c.type, x: c.x, y: c.y, age: Math.max(0, now - c.at) / DEATH_FX_S, heading: c.heading }));
   }
 
   private latestRow(id: number): ZombieRow | undefined {

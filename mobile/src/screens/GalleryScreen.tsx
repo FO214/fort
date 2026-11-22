@@ -32,7 +32,6 @@ import { T } from '../ui/T';
 import { FieldMessage, TextField } from '../ui/TextField';
 import { WeaponGlyph } from '../ui/WeaponGlyph';
 import { ZOMBIE_KINDS, ZOMBIE_SCALE, ZombieSprite } from '../ui/ZombieSprite';
-import { SPRITE_ASPECT } from '../ui/spriteBox';
 
 const SWATCHES: [string, string][] = [
   ['Obsidian', colors.background], ['Graphite', colors.surface], ['Bone', colors.textPrimary], ['Amber', colors.brand.amber],
@@ -183,28 +182,32 @@ export function GalleryScreen({ onClose }: { onClose?: () => void }) {
             {/* On dark and on light: the outline has to carry both. */}
             {[colors.background, colors.sample.bright].map((bg) => (
               <View key={bg} style={[styles.zombies, { backgroundColor: bg }]}>
-                {ZOMBIE_KINDS.map((kind, i) => {
-                  const h = 150 * ZOMBIE_SCALE[kind];
-                  return (
-                    <View key={kind} style={{ alignItems: 'center', justifyContent: 'flex-end' }}>
-                      <ZombieSprite type={i} state={1} size={h} frame={1} hp={1} hurt={false} aimed={false} />
-                      <T v="overline" c={bg === colors.background ? colors.textPrimary : colors.background}>{kind}</T>
-                    </View>
-                  );
-                })}
+                {ZOMBIE_KINDS.map((kind, i) => (
+                  <View key={kind} style={styles.zombie}>
+                    <ZombieSprite type={i} clip="move" frame={3} row={0} mirror={false} size={150 * ZOMBIE_SCALE[kind]} hp={1} hurt={false} aimed={false} />
+                    <T v="overline" c={bg === colors.background ? colors.textPrimary : colors.background}>{kind}</T>
+                  </View>
+                ))}
               </View>
             ))}
-            <T v="label" c={colors.textSecondary}>Attack, hit flash, hurt, and far away.</T>
-            <View style={[styles.zombies, { backgroundColor: colors.sample.dim }]}>
-              {ZOMBIE_KINDS.map((kind, i) => (
-                <View key={kind} style={{ flexDirection: 'row', alignItems: 'flex-end' }}>
-                  <ZombieSprite type={i} state={2} size={120 * ZOMBIE_SCALE[kind]} frame={0} hp={0.4} hurt={false} aimed />
-                  <View style={{ width: 40 * SPRITE_ASPECT, marginLeft: -14 }}>
-                    <ZombieSprite type={i} state={1} size={40} frame={0} hp={1} hurt={i === 1} aimed={false} />
-                  </View>
+            <T v="label" c={colors.textSecondary}>From the side, the quarter and behind. Under the crosshair, biting, hit, falling, and far away.</T>
+            {ZOMBIE_KINDS.map((kind, i) => {
+              const size = 96 * ZOMBIE_SCALE[kind];
+              const pose = { type: i, size, hp: 1, hurt: false, aimed: false, mirror: false } as const;
+              return (
+                <View key={kind} style={[styles.zombies, styles.zombieStates, { backgroundColor: colors.sample.dim }]}>
+                  <View style={styles.zombieCell}><ZombieSprite {...pose} clip="move" frame={2} row={2} /></View>
+                  <View style={styles.zombieCell}><ZombieSprite {...pose} clip="move" frame={5} row={1} mirror /></View>
+                  <View style={styles.zombieCell}><ZombieSprite {...pose} clip="move" frame={8} row={3} /></View>
+                  <View style={styles.zombieCell}><ZombieSprite {...pose} clip="move" frame={0} row={4} /></View>
+                  <View style={styles.zombieCell}><ZombieSprite {...pose} clip="move" frame={6} row={0} hp={0.4} aimed /></View>
+                  <View style={styles.zombieCell}><ZombieSprite {...pose} clip="attack" frame={4} row={1} hp={0.2} /></View>
+                  <View style={styles.zombieCell}><ZombieSprite {...pose} clip="move" frame={1} row={0} hp={0.8} hurt /></View>
+                  <View style={[styles.zombieCell, { width: 200 }]}><ZombieSprite {...pose} clip="die" frame={4} row={2} /></View>
+                  <View style={[styles.zombieCell, { width: 48 }]}><ZombieSprite {...pose} clip="move" frame={4} row={0} size={34} /></View>
                 </View>
-              ))}
-            </View>
+              );
+            })}
           </Section>
 
           <Section n="11" title="Player identities">
@@ -245,5 +248,9 @@ const styles = StyleSheet.create({
   scroll: { padding: space[6], gap: space[8], maxWidth: 720, width: '100%', alignSelf: 'center' },
   row: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: space[4] },
   icon: { width: 74, alignItems: 'center', gap: 4, paddingVertical: space[2] },
-  zombies: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'flex-end', paddingVertical: space[4], borderRadius: radius.xs },
+  zombies: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'flex-end', paddingTop: space[10], paddingBottom: space[4], paddingHorizontal: space[6], borderRadius: radius.xs, overflow: 'hidden' },
+  // The sprite is only as wide as the body; arms reach past it, so give each one room.
+  zombie: { alignItems: 'center', justifyContent: 'flex-end', gap: space[2], marginHorizontal: space[5] },
+  zombieStates: { flexWrap: 'wrap', justifyContent: 'flex-start', rowGap: space[10] },
+  zombieCell: { width: 132, alignItems: 'center', justifyContent: 'flex-end' },
 });

@@ -86,13 +86,10 @@ export const colors = {
     brute: '#887C8A',
     boss: '#A83F3B',
     /**
-     * The figure itself: dark enough to read on a white wall, and dark enough
-     * that even the boss's deep crimson rim stands off it at 3:1.
+     * The thin edge drawn round every figure so it reads on a white wall:
+     * dark enough that even the boss's deep crimson stands off it at 3:1.
      */
     body: '#0E100F',
-    /** Torn clothing on the near versions: one step off the body. */
-    cloth: '#262A27',
-    eye: '#F2A65A',
   },
 
   /** Backings that keep HUD text readable over whatever the camera sees. */

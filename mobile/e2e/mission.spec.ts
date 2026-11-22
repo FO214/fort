@@ -476,6 +476,67 @@ test('endless mode: the host picks it, waves keep coming with no helicopter, and
   for (const p of [ada, bo]) await p.ctx.close();
 });
 
+test('zombies are the 3D model: drawn from the side they are seen from, biting, and falling when shot', async ({ browser }) => {
+  const ada = await phone(browser, 'Ada');
+  // Every sheet the walker needs arrives, and arrives before it is needed.
+  const sheets = new Set<string>();
+  ada.page.on('response', (r) => { const m = /zombies\/(walker-[a-z]+)\.[0-9a-f]+\.webp/.exec(r.url()); if (m && r.ok()) sheets.add(m[1]); });
+  const code = await createSquad(ada);
+  const bo = await phone(browser, 'Bo');
+  await joinSquad(bo, code);
+  await startMission([ada, bo]);
+  for (const p of [ada, bo]) await intoMission(p);
+  await place(ada.page, 0, 0);
+  await place(bo.page, 3, 0);
+  await expect.poll(() => hud.wave(ada.page), { timeout: 15_000 }).toBe(1);
+  await expect.poll(() => [...sheets].sort()).toEqual(['walker-attack', 'walker-die', 'walker-move']);
+  await expect.poll(async () => (await world(ada.page)).zombies.length, { timeout: 15_000 }).toBeGreaterThan(0);
+
+  // A zombie goes for whoever is nearest, so where Bo stands decides whose it is.
+  const FAR: [number, number] = [0, 90];
+  const drawn = (id: number) => ada.page.evaluate((i) => window.__loonieAR!.items.find((z) => z.id === i) ?? null, id);
+  const where = async (id: number) => (await world(ada.page)).zombies.find((z) => z.id === id)!;
+  const lookAt = async (id: number) => ada.page.evaluate((b) => window.__loonieSim!.aim(b), (await where(id)).bearing);
+
+  // Bo is nowhere near: it comes for Ada. She looks at it and sees it from the front, walking.
+  await place(bo.page, ...FAR);
+  const z = (await world(ada.page)).zombies[0].id;
+  await expect.poll(async () => { await lookAt(z); return drawn(z); }, { intervals: [150] }).toMatchObject({ clip: 'move', row: 0, mirror: false });
+  const frame = (await drawn(z))!.frame;
+  await expect.poll(async () => (await drawn(z))?.frame, { intervals: [50] }).not.toBe(frame);       // and it is moving
+  await shot(ada.page, '28-zombie-front');
+
+  // Now Bo is the nearer one, off to its east, and Ada is south of it: it turns and walks across her view,
+  // left to right. She sees its side, the side that faces her.
+  const at = await where(z);
+  await place(bo.page, at.x + 9, at.y);
+  await place(ada.page, at.x, at.y - 13);
+  await expect.poll(async () => { await lookAt(z); return drawn(z); }, { intervals: [150] }).toMatchObject({ clip: 'move', row: 2, mirror: false });
+  await shot(ada.page, '28-zombie-side');
+  // And from the other side of it, the same frames mirrored: it walks right to left.
+  const then = await where(z);
+  await place(ada.page, then.x, then.y + 13);
+  await expect.poll(async () => { await lookAt(z); return drawn(z); }, { intervals: [150] }).toMatchObject({ clip: 'move', row: 2, mirror: true });
+
+  // Bo leaves again. It comes back for Ada, reaches her and bites: facing her, with the attack.
+  await place(bo.page, ...FAR);
+  await expect.poll(async () => { await lookAt(z); return (await drawn(z))?.clip ?? 'not drawn'; }, { timeout: 20_000, intervals: [150] }).toBe('attack');
+  expect(await drawn(z)).toMatchObject({ row: 0, mirror: false });
+  await shot(ada.page, '28-zombie-biting');
+
+  // She shoots it: it falls where it stood, and then it is gone.
+  const fell = ada.page.getByTestId(`corpse-${z}`).waitFor({ state: 'attached', timeout: 20_000 });
+  for (let i = 0; i < 40 && (await world(ada.page)).zombies.some((q) => q.id === z); i++) {
+    await lookAt(z).catch(() => {});
+    await ada.page.getByTestId('fire').click({ timeout: 1_500 }).catch(() => {});
+    await ada.page.waitForTimeout(300);
+  }
+  await fell;
+  await expect(ada.page.getByTestId(`zombie-${z}`)).toHaveCount(0);
+  await expect(ada.page.getByTestId(`corpse-${z}`)).toHaveCount(0, { timeout: 3_000 });
+  for (const p of [ada, bo]) await p.ctx.close();
+});
+
 test('a phone that reloads the page mid-mission drops back into it', async ({ browser }) => {
   const ada = await phone(browser, 'Ada');
   await createSquad(ada);

@@ -282,6 +282,9 @@ test('the design system gallery renders every part of the system', async ({ brow
   const page = await ctx.newPage();
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
+  // The zombie section draws all four types walking, biting and falling: twelve sprite sheets.
+  const sheets = new Set<string>();
+  page.on('response', (r) => { const m = /zombies\/([a-z]+-[a-z]+)\.[0-9a-f]+\.webp/.exec(r.url()); if (m && r.ok()) sheets.add(m[1]); });
   await page.goto(appUrl({ query: 'gallery=1' }));
   await expect(page.getByTestId('gallery')).toBeVisible();
   for (const n of ['01', '04', '05', '06', '07', '08', '09', '10', '11', '12']) {
@@ -289,6 +292,7 @@ test('the design system gallery renders every part of the system', async ({ brow
     await section.scrollIntoViewIfNeeded();
     await section.screenshot({ path: `${__dirname}/output/gallery-${n}.png` });
   }
+  await expect.poll(() => sheets.size).toBe(12);
   expect(errors).toEqual([]);
   await ctx.close();
 });

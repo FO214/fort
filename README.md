@@ -31,7 +31,7 @@ docs/      the build spec
 | 4 | Guns: ESP32 firmware, `/device`, pairing | done: one gun tested end to end on an ESP32-S3 → `firmware/gun/README.md` |
 | 5 | Building map | done: Schmeichel ground floor, real outline, interior from the walkthrough video; not yet checked on site |
 | 6 | Variety and feel | part done: four gun classes (as plain stat tables: no shotgun cone or rifle pierce yet), sound and haptic cues, keep-awake. The phone can draw walkers, runners, brutes and a boss; the server still only spawns walkers |
-| 7 | Real zombie art | not started: the four types are drawn in code, behind the one component to swap |
+| 7 | Real zombie art | done: a block-built, Minecraft-style zombie model rendered into sprite sheets: four types, each walking, biting and falling, seen from eight sides → `mobile/README.md` |
 | UI | BLACKSITE design system | done: every screen, the HUD and all overlays → `mobile/README.md` |
 | Modes | Mission and Endless | done: the host picks in the lobby. Endless has no helicopter: waves keep coming around the squad, each tougher than the last, until nobody is standing → `backend/README.md` |
 

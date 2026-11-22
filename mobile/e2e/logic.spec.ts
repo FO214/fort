@@ -7,8 +7,10 @@ import { fromLocal, toLocal, angleDiffDeg } from '../src/game/geo';
 import { OrientationTracker, pitchFromAttitude } from '../src/game/orientation';
 import { PositionTracker, STEP_M } from '../src/game/position';
 import { StepDetector } from '../src/game/steps';
-import { ZombieBuffer, pickTargets, project, underCrosshair, type Camera } from '../src/game/zombies';
-import { spriteBox } from '../src/ui/spriteBox';
+import { DEATH_FX_S, ZombieBuffer, pickTargets, project, underCrosshair, type Camera } from '../src/game/zombies';
+import { Z_ATTACK, Z_CHASE } from '../src/net/types';
+import { FIGURE_ASPECT, ZOMBIE_KINDS, cellPlace, facing, frameAt, spriteBox, turnOf } from '../src/ui/spriteBox';
+import { ZOMBIE_ANGLES, ZOMBIE_SHEETS } from '../src/ui/zombieSheets';
 
 const ORIGIN: [number, number] = [43.4723, -80.5449];
 const FRAME = { origin: ORIGIN, rotation_deg: 0, start: [0, 0] as [number, number] };
@@ -298,10 +300,67 @@ test.describe('zombies', () => {
 
   test('the sprite box puts the head and feet exactly where the projection says', () => {
     const b = spriteBox(400, 100, 300);
-    // Head top is 21 units below the view-box top, feet 196 of 204 units down.
-    expect(b.top + (21 / 204) * b.height).toBeCloseTo(100, 5);
-    expect(b.top + (196 / 204) * b.height).toBeCloseTo(300, 5);
-    expect(b.left + (64 / 124) * b.width).toBeCloseTo(400, 5);
+    expect(b.top).toBeCloseTo(100, 5);
+    expect(b.top + b.height).toBeCloseTo(300, 5);
+    expect(b.left + b.width / 2).toBeCloseTo(400, 5);
+  });
+
+  test('every frame stands its zombie on the floor of the box, at the right height', () => {
+    const SIZE = 180;                                                // a body box 180 px tall: 100 px per metre
+    for (const kind of ZOMBIE_KINDS) {
+      for (const clip of ['move', 'attack', 'die'] as const) {
+        const sheet = ZOMBIE_SHEETS[kind][clip];
+        const front = cellPlace(sheet, SIZE, 0, { row: 0, mirror: false });
+        const what = `${kind} ${clip}`;
+        // The floor line of the frame lands on the bottom of the box.
+        expect(front.top + sheet.floorY * front.scale, what).toBeCloseTo(SIZE, 5);
+        expect(front.scale * sheet.ppm, what).toBeCloseTo(100, 5);
+        // From the front the frame is centred `side` metres off the body (a fallen zombie lies to one side).
+        expect(front.left + front.width / 2 - (SIZE * FIGURE_ASPECT) / 2, what).toBeCloseTo(sheet.side * 100, 5);
+        // From the side it is centred ahead of the feet, and mirrored it is the same distance the other way.
+        const right = cellPlace(sheet, SIZE, 0, { row: 2, mirror: false }), left = cellPlace(sheet, SIZE, 0, { row: 2, mirror: true });
+        expect(right.left + right.width / 2 - (SIZE * FIGURE_ASPECT) / 2, what).toBeCloseTo(sheet.forward * 100, 5);
+        expect(left.left + left.width / 2 - (SIZE * FIGURE_ASPECT) / 2, what).toBeCloseTo(-sheet.forward * 100, 5);
+        // Every frame of every angle is inside the sheet.
+        const last = cellPlace(sheet, SIZE, sheet.frames - 1, { row: ZOMBIE_ANGLES.length - 1, mirror: false });
+        expect((last.col + 1) * sheet.cw, what).toBeLessThanOrEqual(sheet.w);
+        expect((last.line + 1) * sheet.ch, what).toBeLessThanOrEqual(sheet.h);
+        // And a sheet is never bigger than a phone can hold as one texture.
+        expect(Math.max(sheet.w, sheet.h), what).toBeLessThanOrEqual(2048);
+      }
+    }
+  });
+
+  test('a zombie is drawn from the side it is seen from', () => {
+    // The viewer stands at the origin looking north at a zombie 10 m away.
+    const turn = (heading: number) => turnOf(heading, 0, 10, 0, 0);
+    expect(turn(180)).toBe(0);                                       // walking south: straight at the viewer
+    expect(turn(0)).toBe(180);                                       // walking away
+    expect(turn(90)).toBe(90);                                       // walking east: turned to the viewer's right
+    expect(turn(270)).toBe(-90);
+    expect(facing(0)).toEqual({ row: 0, mirror: false });
+    expect(facing(40)).toEqual({ row: 1, mirror: false });
+    expect(facing(-40)).toEqual({ row: 1, mirror: true });           // the other side is the same frame flipped
+    expect(facing(-90)).toEqual({ row: 2, mirror: true });
+    expect(facing(170)).toEqual({ row: 4, mirror: false });
+    expect(facing(-175)).toEqual({ row: 4, mirror: false });         // square on from behind: nothing to flip
+    expect(facing(-10)).toEqual({ row: 0, mirror: false });
+    // Hovering on the line between two angles, it keeps the one it had.
+    expect(facing(24)).toEqual({ row: 1, mirror: false });
+    expect(facing(24, { row: 0, mirror: false })).toEqual({ row: 0, mirror: false });
+    expect(facing(21, { row: 1, mirror: false })).toEqual({ row: 1, mirror: false });
+    expect(facing(35, { row: 0, mirror: false })).toEqual({ row: 1, mirror: false });
+  });
+
+  test('animations loop, except the fall, which plays once and stays down', () => {
+    const walk = ZOMBIE_SHEETS.walker.move, fall = ZOMBIE_SHEETS.walker.die;
+    expect(frameAt(walk, 0)).toBe(0);
+    expect(frameAt(walk, walk.seconds / 2)).toBe(walk.frames / 2);
+    expect(frameAt(walk, walk.seconds * 7 + 0.001)).toBe(0);
+    expect(frameAt(walk, -0.001)).toBe(walk.frames - 1);
+    expect(frameAt(fall, 0)).toBe(0);
+    expect(frameAt(fall, fall.seconds * 5)).toBe(fall.frames - 1);
+    expect(fall.seconds).toBeCloseTo(DEATH_FX_S, 5);                 // the fall lasts as long as the corpse does
   });
 
   test('the crosshair is on a zombie only when it really is', () => {
@@ -359,8 +418,25 @@ test.describe('zombies', () => {
     b.onKill(1, 0, 9, 10.15);
     expect(b.sample(10.16)).toEqual([]);
     expect(b.dying(10.3)).toHaveLength(1);
-    expect(b.dying(10.3)[0].age).toBeCloseTo(0.25, 2);
+    expect(b.dying(10.3)[0].age).toBeCloseTo(0.15 / DEATH_FX_S, 2);
+    expect(b.dying(10.3)[0].heading).toBe(180);                      // it was walking south, and falls that way round
     expect(b.dying(11)).toHaveLength(0);
+  });
+
+  test('a zombie faces the way it walks, and holds that when it stops to bite', () => {
+    const b = new ZombieBuffer();
+    b.push(1.0, [[1, 0, 0, 10, 6, Z_CHASE, 'a']]);
+    expect(b.sample(1.05)[0].heading).toBeNull();                    // not seen to move yet
+    b.push(1.1, [[1, 0, 0.12, 10, 6, Z_CHASE, 'a']]);
+    expect(b.sample(1.15)[0].heading).toBeCloseTo(90, 5);            // east
+    b.push(1.2, [[1, 0, 0.125, 10, 6, Z_CHASE, 'a']]);               // barely moved: no new opinion
+    expect(b.sample(1.25)[0].heading).toBeCloseTo(90, 5);
+    b.push(1.3, [[1, 0, 0.125, 9.8, 6, Z_ATTACK, 'a']]);             // shoved while biting: not a turn
+    expect(b.sample(1.35)[0].heading).toBeCloseTo(90, 5);
+    b.push(1.4, [[1, 0, 0.125, 9.68, 6, Z_CHASE, 'a']]);             // off again, south: it comes round, not all at once
+    const h = b.sample(1.45)[0].heading!;
+    expect(h).toBeGreaterThan(90);
+    expect(h).toBeLessThan(180);
   });
 });
 
@@ -369,7 +445,7 @@ test.describe('zombies', () => {
 import { FORMATION, FORMATION_MICRO, MARK_SIZE, WORDMARK } from '../src/brand/geometry';
 import { clock, extractionLine, healthPct, normalizeCode } from '../src/game/format';
 import { MARKER_SHAPES, identityForSlot, identityOf } from '../src/game/identity';
-import { PLAYER_COLORS, colors, contrast, hud, touch, type as typeScale } from '../src/theme';
+import { PLAYER_COLORS, colors, contrast, hud, luminance, touch, type as typeScale } from '../src/theme';
 
 /** `rgba(r,g,b,a)` laid over an opaque colour, as an opaque `#RRGGBB`. */
 function over(rgba: string, base: string): string {
@@ -426,12 +502,20 @@ test.describe('contrast', () => {
     expect(contrast(colors.textPrimary, over(colors.camera.backing, '#000000'))).toBeGreaterThanOrEqual(AA);
   });
 
-  test('zombies read on light and on dark: a dark body, a rim that stands off it', () => {
-    for (const kind of ['walker', 'runner', 'brute', 'boss'] as const) {
-      expect(contrast(colors.zombies[kind], colors.zombies.body), `${kind} rim on its body`).toBeGreaterThanOrEqual(LARGE);
+  test('zombies read on light and on dark', () => {
+    // Contrast between two luminances, as WCAG has it.
+    const ratio = (a: number, b: number) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+    for (const kind of ZOMBIE_KINDS) {
+      // The figure itself, as rendered: lit enough to stand off the darkest scene, dark enough for a white wall.
+      for (const clip of ['move', 'attack'] as const) {
+        const lit = ZOMBIE_SHEETS[kind][clip].luminance;
+        expect(ratio(lit, luminance(colors.background)), `${kind} ${clip} in the dark`).toBeGreaterThanOrEqual(LARGE);
+        expect(ratio(lit, luminance(WHITE)), `${kind} ${clip} on white`).toBeGreaterThanOrEqual(AA);
+      }
+      // Its type colour (the outline under the crosshair, the edge markers) against the dark edge it sits on.
+      expect(contrast(colors.zombies[kind], colors.zombies.body), `${kind} colour on the dark edge`).toBeGreaterThanOrEqual(LARGE);
     }
     expect(contrast(colors.zombies.body, colors.sample.bright)).toBeGreaterThanOrEqual(7);
-    expect(contrast(colors.zombies.eye, colors.zombies.body)).toBeGreaterThanOrEqual(AA);
   });
 
   test('player identities: four colours that stand off the background, and four different shapes', () => {
