@@ -1,7 +1,13 @@
 /** Wire types. Mirrors backend/app/models.py and the events in room.py. */
 
 export type RoomPhase = 'lobby' | 'playing' | 'ended';
-export type MissionPhase = 'journey' | 'holdout' | 'final' | 'extracted' | 'wiped';
+export type MissionPhase = 'journey' | 'holdout' | 'final' | 'extracted' | 'wiped' | 'endless';
+/**
+ * The two ways to play.
+ *   mission  walk to the helicopter, hold it, extract
+ *   endless  no helicopter: waves keep coming until nobody is standing
+ */
+export type GameMode = 'mission' | 'endless';
 export type PlayerState = 'alive' | 'knocked' | 'dead';
 
 export interface GunClass {
@@ -9,7 +15,7 @@ export interface GunClass {
   reload_s: number; spread_deg: number; range_m: number; automatic: boolean; hp: number;
 }
 
-export interface Settings { max_players: number; map: string }
+export interface Settings { max_players: number; map: string; mode?: GameMode }
 
 export interface LobbyPlayer { id: string; name: string; cls: string; ready: boolean; connected: boolean }
 
@@ -63,12 +69,16 @@ export interface Result { id: string; name: string; cls: string; kills: number; 
 
 export interface EndedMsg {
   t: 'ended'; outcome: 'extracted' | 'wiped'; results: Result[]; wave: number; kills: number; duration_s: number;
+  /** Absent from an older server, which only knows the mission. */
+  mode?: GameMode;
 }
 
 export type ServerMsg =
   | { t: 'welcome'; player_id: string; token: string; code: string; host_id: string; classes: Record<string, GunClass>; map: MapInfo; maps: MapChoice[] }
   | { t: 'lobby'; code: string; host_id: string; phase: RoomPhase; settings: Settings; players: LobbyPlayer[]; map: MapInfo }
-  | { t: 'started'; now: number; map: MapInfo; mission: MissionState }
+  | { t: 'started'; now: number; map: MapInfo; mission: MissionState;
+      /** Server time the run began, and which mode it is. Absent from an older server. */
+      at?: number; mode?: GameMode }
   | { t: 'snap'; now: number; ph: MissionPhase; wave: [number, number, number]; hold: [number, number];
       /** Extraction `[progress 0–1, holders needed, ids holding]`. */
       ex: [number, number, string[]]; z: ZombieRow[]; p: PlayerSnap[] }

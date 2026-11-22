@@ -1,37 +1,44 @@
 import 'react-native-gesture-handler';
 import React, { useEffect, useState } from 'react';
+import { View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { Game } from './src/screens/Game';
-import { Join } from './src/screens/Join';
-import { Lobby } from './src/screens/Lobby';
-import { Menu } from './src/screens/Menu';
-import { Summary } from './src/screens/Summary';
+import { useAppFonts } from './src/fonts';
+import { JoinMissionScreen } from './src/screens/JoinMissionScreen';
+import { LobbyScreen } from './src/screens/LobbyScreen';
+import { MainMenuScreen } from './src/screens/MainMenuScreen';
+import { MatchScreen } from './src/screens/MatchScreen';
+import { ResultsScreen } from './src/screens/ResultsScreen';
+import { GalleryScreen } from './src/screens/GalleryScreen';
 import { useStore } from './src/store';
-import { Screen } from './src/ui/Screen';
+import { colors } from './src/theme';
 
 function Router() {
   const phase = useStore((s) => s.phase);
+  const gallery = useStore((s) => s.gallery);
+  if (gallery) return <GalleryScreen onClose={() => useStore.getState().setGallery(false)} />;
   switch (phase) {
-    case 'join': return <Join />;
-    case 'lobby': return <Lobby />;
-    case 'playing': return <Game />;
-    case 'summary': return <Summary />;
-    default: return <Menu />;
+    case 'join': return <JoinMissionScreen />;
+    case 'lobby': return <LobbyScreen />;
+    case 'playing': return <MatchScreen />;
+    case 'summary': return <ResultsScreen />;
+    default: return <MainMenuScreen />;
   }
 }
 
 export default function App() {
-  const [ready, setReady] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
+  const fontsReady = useAppFonts();
   useEffect(() => {
-    useStore.getState().hydrate().finally(() => setReady(true));
+    useStore.getState().hydrate().finally(() => setHydrated(true));
   }, []);
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: colors.background }}>
       <SafeAreaProvider>
         <StatusBar style="light" />
-        {ready ? <Router /> : <Screen><></></Screen>}
+        {/* Nothing is drawn in a fallback face: the first frame already has the real type. */}
+        {hydrated && fontsReady ? <Router /> : <View style={{ flex: 1, backgroundColor: colors.background }} />}
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

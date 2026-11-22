@@ -84,7 +84,7 @@ classes and the map), then `lobby` on every roster change.
 
 | phone → server | server → phone |
 |---|---|
-| `ready` `set_class` `set_map` (host) `start {lat?, lon?}` | `welcome` (classes, map, maps) `lobby` (map) `started` |
+| `ready` `set_class` `set_map` (host) `set_mode {mode}` (host) `start {lat?, lon?}` | `welcome` (classes, map, maps) `lobby` (map, settings incl. `mode`) `started` (`mode`, `at`) |
 | `pos {x, y, acc, heading, pitch}` ~8 Hz | `snap` 10 Hz |
 | `fire {seq, hits, heading}` `reload` | `fired` `zhit` `zkill` `reload` `reloaded` |
 | `revive {target, on}` | `hurt {dir}` `knocked` `revived` `dead` |
@@ -97,6 +97,20 @@ the server answers `paired` or `unpaired`. A phone's `pair_gun` opens a 10 s win
 first unpaired gun to pull its trigger becomes that player's (pairing in `app/devices.py`).
 A gun whose player is gone is freed. Presses reach the phone as `trigger` / `reload_btn`.
 
+
+## Modes
+
+The host picks one in the lobby with `set_mode`; it is part of `settings` in
+every `lobby` message and locks when the run starts.
+
+- **`mission`** (the default): journey to the helicopter, hold it, final wave,
+  extract.
+- **`endless`**: one phase, `endless`, that never changes. There is no
+  helicopter to reach and nothing to extract on (`arrived` and `extract` do
+  nothing). Waves spawn around the squad wherever it stands, each bigger than
+  the last, and each wave's zombies have `endless_hp_growth` more health than
+  the wave before. The run ends only as `wiped`. `started` carries `at`, the
+  server time the run began, so a phone can show how long the squad has lasted.
 
 ## Tuning
 

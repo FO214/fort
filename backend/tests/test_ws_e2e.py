@@ -169,13 +169,13 @@ async def test_four_phones_fight_a_wave(server):
     assert set(welcome["classes"]) == set(CLASSES) and welcome["map"]["id"] == "arena"
 
     # Loadout and ready show up for everyone.
-    await bo.send(t="set_class", cls="light")
-    await di.send(t="set_class", cls="heavy")
+    await bo.send(t="set_class", cls="smg")
+    await di.send(t="set_class", cls="rifle")
     for c in (ada, bo, cy, di):
         await c.send(t="ready", ready=True)
     lobby = await cy.until("lobby", pred=lambda m: all(p["ready"] for p in m["players"]))
     assert {p["name"]: p["cls"] for p in lobby["players"]} == \
-        {"Ada": "regular", "Bo": "light", "Cy": "regular", "Di": "heavy"}
+        {"Ada": "pistol", "Bo": "smg", "Cy": "pistol", "Di": "rifle"}
 
     # Only the host starts. Her GPS fix anchors the arena for the whole squad.
     await bo.send(t="start")
@@ -193,7 +193,7 @@ async def test_four_phones_fight_a_wave(server):
     snap = await di.until("snap", pred=lambda m: {(p["x"], p["y"]) for p in m["p"]}
                           == set(spots.values()))
     assert {(p["x"], p["y"]) for p in snap["p"]} == set(spots.values())
-    assert bo.id in {p["id"] for p in snap["p"]} and di.me(snap)["max"] == CLASSES["heavy"].hp
+    assert bo.id in {p["id"] for p in snap["p"]} and di.me(snap)["max"] == CLASSES["rifle"].hp
 
     # The first wave arrives: 8 zombies for four players, identical on every phone.
     wave = await ada.until("wave", cleared=False)
@@ -356,6 +356,33 @@ async def test_solo_player_gets_bitten_knocked_and_wiped(server):
     await again.until("welcome")
     assert (await again.until("ended"))["outcome"] == "wiped"
     await again.ws.close()
+
+
+@pytest.mark.asyncio
+async def test_endless_mode_over_the_wire(server):
+    (ada, bo), _ = await squad(server, ["Ada", "Bo"])
+    # Only the host can switch, and everyone hears about it.
+    await bo.send(t="set_mode", mode="endless")
+    assert "host" in (await bo.until("error"))["msg"]
+    await ada.send(t="set_mode", mode="endless")
+    lobby = await bo.until("lobby", pred=lambda m: m["settings"]["mode"] == "endless")
+    assert lobby["settings"]["mode"] == "endless"
+    await ada.send(t="set_mode", mode="sandbox")
+    assert (await ada.until("error"))["msg"] == "Bad message"
+
+    await ada.send(t="start")
+    started = await bo.until("started")
+    assert started["mode"] == "endless" and started["mission"]["phase"] == "endless" and started["at"] <= started["now"]
+    await ada.pos(0, 0, heading=0)
+    await bo.pos(2, 0, heading=0)
+    wave = await ada.until("wave", timeout=15)
+    assert wave["n"] == 1 and wave["phase"] == "endless" and not wave["cleared"]
+    snap = await ada.until("snap", pred=lambda m: m["wave"][0] == 1)
+    assert snap["ph"] == "endless"
+
+    # Nobody fights back: the only way an endless run ends.
+    ended = await ada.until("ended", timeout=40)
+    assert ended["outcome"] == "wiped" and ended["mode"] == "endless" and ended["wave"] >= 1
 
 
 @pytest.mark.asyncio

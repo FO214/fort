@@ -3,19 +3,28 @@
  * is the gun pointing, where are the zombies" and places a sprite for each
  * one in view. It also works out what the crosshair is on, with the very
  * same numbers, and leaves that in `aimRef` for the trigger to use.
+ *
+ * Zombies that are close but out of view get a marker on the screen edge
+ * nearest them, so a player knows to turn before they are bitten.
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
+import { angleDiffDeg, bearingXY } from '../game/geo';
 import { tracking } from '../game/tracking';
 import { CAMERA_HFOV_DEG, pickTargets, project, type Camera } from '../game/zombies';
 import type { GunClass } from '../net/types';
 import { serverNow, zombies } from '../store';
+import { colors } from '../theme';
 import { SPRITE_ASPECT, spriteBox } from './spriteBox';
-import { ZombieSprite } from './ZombieSprite';
+import { EdgeMarker, type EdgeThreat } from './ThreatMarker';
+import { ZOMBIE_GAIT, ZOMBIE_SCALE, ZombieSprite, zombieKind } from './ZombieSprite';
 
 const FRAME_MS = 33;                               // ~30 fps is plenty for shambling
 const MAX_DRAW_M = 70;
 const SIZES = [48, 96, 192, 384, 768];             // sprite render sizes; scaled down to fit, never up much
+/** An unseen zombie this close gets an edge marker. */
+const THREAT_RANGE_M = 14;
+const THREATS_PER_SIDE = 3;
 
 export interface AimState {
   /** Zombies under the crosshair, nearest first. */
@@ -30,14 +39,17 @@ interface Item {
 }
 
 /** What the last frame drew, for tests and on-device debugging. */
-export const arDebug: { items: { id: number; x: number; y: number; h: number; dist: number; aimed: boolean }[]; aim: number[] } = { items: [], aim: [] };
+export const arDebug: { items: { id: number; x: number; y: number; h: number; dist: number; aimed: boolean }[]; aim: number[]; threats: number[] } = { items: [], aim: [], threats: [] };
 if (typeof window !== 'undefined') (window as unknown as { __loonieAR?: unknown }).__loonieAR = arDebug;
 
-export function ZombieLayer({ width, height, cls, aimRef, onAimChange }: {
+export function ZombieLayer({ width, height, cls, aimRef, onAimChange, inset = 0 }: {
   width: number; height: number; cls: GunClass | undefined;
   aimRef: React.MutableRefObject<AimState>; onAimChange: (onTarget: boolean) => void;
+  /** How far in from the left and right edges the threat markers sit (safe areas). */
+  inset?: number;
 }) {
   const [items, setItems] = useState<Item[]>([]);
+  const [threats, setThreats] = useState<EdgeThreat[]>([]);
   const dims = useRef({ width, height, cls, onAimChange });
   dims.current = { width, height, cls, onAimChange };
 
@@ -53,6 +65,7 @@ export function ZombieLayer({ width, height, cls, aimRef, onAimChange }: {
       const pose = tracking.pose();
       const now = serverNow();
       const out: Item[] = [];
+      const unseen: (EdgeThreat & { dist: number })[] = [];
       let ids: number[] = [];
 
       if (pose.heading != null) {
@@ -60,10 +73,11 @@ export function ZombieLayer({ width, height, cls, aimRef, onAimChange }: {
         const live = zombies.sample(now);
         if (gun) ids = pickTargets(live, cam, gun);
         const aimed = ids[0];
-        const place = (x: number, y: number) => {
+        const place = (x: number, y: number, grow = 1) => {
           const p = project(x, y, cam);
           if (!p || p.dist > MAX_DRAW_M) return null;
-          const box = spriteBox(p.sx, p.top, p.bottom);
+          // Bigger types stand on the same floor and rise from it.
+          const box = spriteBox(p.sx, p.bottom - (p.bottom - p.top) * grow, p.bottom);
           if (box.left > w || box.left + box.width < 0 || box.top > h || box.top + box.height < 0 || box.height < 8) return null;
           const size = SIZES.find((s) => s >= box.height) ?? SIZES[SIZES.length - 1];
           const scale = box.height / size;
@@ -72,23 +86,37 @@ export function ZombieLayer({ width, height, cls, aimRef, onAimChange }: {
             p, size, scale,
             left: box.left + box.width / 2 - (size * SPRITE_ASPECT) / 2,
             top: box.top + box.height / 2 - size / 2,
-            far: Math.max(0.55, Math.min(1, 1.25 - p.dist / 60)),
+            far: Math.max(0.6, Math.min(1, 1.25 - p.dist / 60)),
           };
         };
         for (const z of live) {
-          const q = place(z.x, z.y);
-          if (!q) continue;
-          const t = now * 2.2 + z.id * 0.37;
+          const kind = zombieKind(z.type);
+          const q = place(z.x, z.y, ZOMBIE_SCALE[kind]);
+          if (!q) {
+            const dist = Math.hypot(z.x - cam.x, z.y - cam.y);
+            if (dist <= THREAT_RANGE_M) {
+              const off = angleDiffDeg(bearingXY(cam.x, cam.y, z.x, z.y), cam.heading);
+              // Just out of view sits high on the edge; directly behind sits low.
+              const behind = Math.min(1, Math.max(0, (Math.abs(off) - CAMERA_HFOV_DEG / 2) / (180 - CAMERA_HFOV_DEG / 2)));
+              unseen.push({
+                key: `t${z.id}`, id: z.id, side: off >= 0 ? 'right' : 'left', y: h * (0.3 + 0.42 * behind),
+                near: dist <= THREAT_RANGE_M / 2.5, color: colors.zombies[kind], dist,
+              });
+            }
+            continue;
+          }
+          const t = now * ZOMBIE_GAIT[kind] + z.id * 0.37;
           out.push({
             key: `z${z.id}`, id: z.id, type: z.type, state: z.state, frame: Math.floor(t) % 2,
             hp: z.maxHp > 0 ? z.hp / z.maxHp : 1, hurt: z.hitAge < 0.09, aimed: z.id === aimed,
             left: q.left, top: q.top, size: q.size, scale: q.scale,
-            opacity: Math.min(1, z.age / 0.45) * q.far, tilt: Math.sin(t * Math.PI) * 2.5, squash: 1, dist: q.p.dist,
+            opacity: Math.min(1, z.age / 0.45) * q.far, tilt: Math.sin(t * Math.PI) * (kind === 'runner' ? 1.5 : 2.5), squash: 1, dist: q.p.dist,
           });
         }
         for (const c of zombies.dying(now)) {
-          const q = place(c.x, c.y);
+          const q = place(c.x, c.y, ZOMBIE_SCALE[zombieKind(c.type)]);
           if (!q) continue;
+          // Dying: flash, pitch over, sink and fade. Unmistakably gone.
           out.push({
             key: `d${c.id}`, id: c.id, type: c.type, state: 0, frame: 0, hp: 1, hurt: c.age < 0.2, aimed: false,
             left: q.left, top: q.top + (q.size * q.scale * c.age) / 2, size: q.size, scale: q.scale,
@@ -101,13 +129,20 @@ export function ZombieLayer({ width, height, cls, aimRef, onAimChange }: {
         aimRef.current = { ids: [], heading: 0 };
       }
 
+      // Nearest few per side; a wall of markers would say nothing.
+      unseen.sort((a, b) => a.dist - b.dist);
+      const shown: EdgeThreat[] = [];
+      for (const side of ['left', 'right'] as const) shown.push(...unseen.filter((t) => t.side === side).slice(0, THREATS_PER_SIDE));
+
       arDebug.aim = ids;
+      arDebug.threats = shown.map((t) => t.id);
       arDebug.items = out.filter((i) => i.key[0] === 'z').map((i) => ({
         id: i.id, x: i.left + (i.size * SPRITE_ASPECT) / 2, y: i.top + i.size / 2, h: i.size * i.scale, dist: i.dist, aimed: i.aimed,
       }));
       const onTarget = ids.length > 0;
       if (onTarget !== wasOnTarget) { wasOnTarget = onTarget; notify(onTarget); }
       setItems(out);
+      setThreats((prev) => (prev.length === 0 && shown.length === 0 ? prev : shown));
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
@@ -124,6 +159,7 @@ export function ZombieLayer({ width, height, cls, aimRef, onAimChange }: {
           <ZombieSprite type={i.type} state={i.state} size={i.size} frame={i.frame} hp={i.hp} hurt={i.hurt} aimed={i.aimed} />
         </View>
       ))}
+      {threats.map((t) => <EdgeMarker key={t.key} threat={t} inset={inset} />)}
     </View>
   );
 }

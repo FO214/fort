@@ -174,3 +174,57 @@ def test_tuning_comes_from_the_environment(monkeypatch):
         Tuning.from_env()
     monkeypatch.delenv("LOONIE_TUNING")
     assert Tuning.from_env() == Tuning()
+
+
+# ------------------------------------------------------------------ endless
+
+def make_endless(players=1, **tuning):
+    world = World()
+    m = Mission(world, load_map("arena"), Tuning(**tuning), players, T0, random.Random(3), mode="endless")
+    return m, world
+
+
+def test_endless_is_one_phase_and_the_waves_never_stop():
+    m, world = make_endless(grace_s=1, rest_s=2, spawn_gap_s=0.05)
+    assert m.phase == "endless" and m.state()["phase"] == "endless"
+    t = T0
+    for n in range(1, 9):
+        t, ev = run(m, t + 3, t)
+        assert m.wave == n and m.phase == "endless"
+        assert {"t": "wave", "n": n, "count": m.wave_size(n), "cleared": False, "phase": "endless"} in ev
+        for zid in list(world.zombies):
+            world.damage(zid, 999)
+        t, ev = run(m, t + 0.1, t)
+        assert ev == [{"t": "wave", "n": n, "cleared": True, "next_in": 2, "phase": "endless"}]
+
+
+def test_endless_has_no_helicopter_to_reach_and_nothing_to_extract_on():
+    m, _ = make_endless(grace_s=1)
+    run(m, T0 + 2)
+    assert m.arrive(T0 + 2) == [] and m.phase == "endless"       # standing on the pad changes nothing
+    assert m.extract(1.0, ["a", "b"], 2) == [] and m.extract_progress == 0.0
+    assert m.phase == "endless"
+
+
+def test_endless_zombies_get_tougher_wave_by_wave_and_mission_zombies_do_not():
+    m, world = make_endless(grace_s=1, rest_s=1, spawn_gap_s=0.05, endless_hp_growth=0.5)
+    t, hp = T0, []
+    for _ in range(3):
+        t, _ = run(m, t + 2.5, t)
+        hp.append(max(z.hp for z in world.zombies.values()))
+        for zid in list(world.zombies):
+            world.damage(zid, 999)
+        t, _ = run(m, t + 0.1, t)
+    assert hp == [6, 9, 12]                                      # +50% of a walker's 6 each wave
+
+    plain, _ = make(grace_s=1)
+    plain.wave = 9
+    assert plain.zombie_hp_scale() == 1.0
+
+
+def test_an_ignored_endless_wave_does_not_hold_the_next_one_back():
+    m, world = make_endless(grace_s=1, wave_max_s=6, spawn_gap_s=0.1)
+    t, _ = run(m, T0 + 3)
+    assert m.wave == 1
+    t, ev = run(m, T0 + 8, t)                                    # nobody shot anything
+    assert m.wave == 2 and len(world.zombies) > m.wave_size(1)
