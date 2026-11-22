@@ -17,3 +17,7 @@ mobile/e2e/report/
 # misc
 .DS_Store
 *.log
+
+# gun firmware
+firmware/gun/include/config.h
+firmware/gun/.pio/

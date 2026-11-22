@@ -85,5 +85,9 @@ export type ServerMsg =
   | { t: 'reload'; player_id: string; until: number }
   | { t: 'reloaded'; player_id: string; ammo: number }
   | EndedMsg
+  | { t: 'pairing'; until: number }
+  | { t: 'gun'; on: boolean }
+  | { t: 'trigger'; down: boolean }
+  | { t: 'reload_btn' }
   | { t: 'pong'; ts: number; now: number }
   | { t: 'error'; msg: string; detail?: unknown };

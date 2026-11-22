@@ -120,6 +120,10 @@ export function Lobby() {
       {isHost
         ? <GlassButton label="Start mission" variant="primary" size="lg" onPress={start} testID="start" />
         : <T v="caption" c={color.ink3} style={{ textAlign: 'center' }}>The host starts the mission</T>}
+      <GlassButton
+        label={s.gun === 'paired' ? 'Gun paired · pair again' : s.gun === 'pairing' ? 'Pull the trigger on your gun…' : 'Pair gun'}
+        variant={s.gun === 'paired' ? 'primary' : 'glass'} disabled={s.gun === 'pairing'}
+        onPress={() => { net.pairGun(); s.startPairing(); }} testID="pair-gun" />
       <GlassButton label="Leave" variant="ghost" onPress={leave} testID="leave" />
       {s.error ? <T v="caption" c={color.danger} testID="error">{s.error}</T> : null}
     </View>

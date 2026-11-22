@@ -9,6 +9,7 @@ The build spec is [docs/pve-plan.md](docs/pve-plan.md).
 ```
 backend/   FastAPI + WebSocket server: world, waves, mission, rules   → backend/README.md
 mobile/    Expo / React Native app: sensors, AR view, HUD             → mobile/README.md
+firmware/  ESP32 gun: trigger + reload buttons over Wi-Fi                → firmware/gun/README.md
 docs/      the build spec
 ```
 
@@ -20,7 +21,7 @@ docs/      the build spec
 | 1 | Server core: world, waves, shot validation | done |
 | 2 | Phone AR + shooting | done |
 | 3 | Full mission: knock, revive, helicopter, holdout, extraction | done |
-| 4 | Guns: ESP32 firmware, `/device`, pairing | not in this pass; phones use on-screen Fire and Reload |
+| 4 | Guns: ESP32 firmware, `/device`, pairing | done: one gun tested end to end on an ESP32-S3 → `firmware/gun/README.md` |
 | 5 | Building map | machinery done; the Schmeichel map has the real outline but its interior is a placeholder until the walkthrough video can be read |
 | 6–7 | Zombie variety, sound, real art | not started |
 

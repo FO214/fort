@@ -127,6 +127,11 @@ class Arrived(BaseModel):
     t: Literal["arrived"]
 
 
+class PairGun(BaseModel):
+    """Open a 10 s window: the first gun to pull its trigger becomes mine."""
+    t: Literal["pair_gun"]
+
+
 class Leave(BaseModel):
     t: Literal["leave"]
 
@@ -139,3 +144,17 @@ class Reset(BaseModel):
 class Ping(BaseModel):
     t: Literal["ping"]
     ts: float
+
+
+# ------------------------------------------------------------- gun -> server
+
+class DeviceHello(BaseModel):
+    t: Literal["hello"]
+    gun_id: str = Field(min_length=1, max_length=32, pattern=r"^[A-Za-z0-9_:-]+$")
+
+
+class DeviceBtn(BaseModel):
+    """A button went down or up on the gun."""
+    t: Literal["btn"]
+    b: Literal["trigger", "reload"]
+    down: bool
