@@ -363,3 +363,188 @@ test.describe('zombies', () => {
     expect(b.dying(11)).toHaveLength(0);
   });
 });
+
+// ------------------------------------------------------------------ design system
+
+import { FORMATION, FORMATION_MICRO, MARK_SIZE, WORDMARK } from '../src/brand/geometry';
+import { clock, extractionLine, healthPct, normalizeCode } from '../src/game/format';
+import { MARKER_SHAPES, identityForSlot, identityOf } from '../src/game/identity';
+import { PLAYER_COLORS, colors, contrast, hud, touch, type as typeScale } from '../src/theme';
+
+/** `rgba(r,g,b,a)` laid over an opaque colour, as an opaque `#RRGGBB`. */
+function over(rgba: string, base: string): string {
+  const [r, g, b, a] = rgba.match(/[\d.]+/g)!.map(Number);
+  const n = parseInt(base.slice(1), 16);
+  const mix = (top: number, under: number) => Math.round(top * a + under * (1 - a));
+  return '#' + [mix(r, (n >> 16) & 255), mix(g, (n >> 8) & 255), mix(b, n & 255)].map((v) => v.toString(16).padStart(2, '0')).join('');
+}
+
+test.describe('contrast', () => {
+  const AA = 4.5, LARGE = 3;
+  const WHITE = '#FFFFFF';
+
+  test('text on the solid surfaces meets WCAG AA', () => {
+    for (const surface of [colors.background, colors.surface, colors.surfaceElevated, colors.surfaceOverlay]) {
+      expect(contrast(colors.textPrimary, surface), `primary on ${surface}`).toBeGreaterThanOrEqual(AA);
+      expect(contrast(colors.textSecondary, surface), `secondary on ${surface}`).toBeGreaterThanOrEqual(AA);
+      expect(contrast(colors.status.health, surface), `ready on ${surface}`).toBeGreaterThanOrEqual(AA);
+      expect(contrast(colors.status.dangerText, surface), `small red text on ${surface}`).toBeGreaterThanOrEqual(AA);
+      expect(contrast(colors.brand.amber, surface), `amber on ${surface}`).toBeGreaterThanOrEqual(AA);
+    }
+    // Muted is for tertiary labels only, and still clears the large-text bar where it is used.
+    for (const surface of [colors.background, colors.surface, colors.surfaceOverlay]) {
+      expect(contrast(colors.textMuted, surface), `muted on ${surface}`).toBeGreaterThanOrEqual(LARGE);
+    }
+  });
+
+  test('labels on filled buttons meet AA', () => {
+    expect(contrast(colors.brand.onAmber, colors.brand.amber)).toBeGreaterThanOrEqual(AA);
+    expect(contrast(colors.brand.onAmber, colors.brand.amberPressed)).toBeGreaterThanOrEqual(AA);
+    expect(contrast(colors.status.onDanger, colors.status.dangerSurface)).toBeGreaterThanOrEqual(AA);
+    expect(contrast(colors.status.onDanger, colors.status.dangerPressed)).toBeGreaterThanOrEqual(AA);
+  });
+
+  test('status colours used for icons, bars and large text clear 3:1', () => {
+    for (const c of [colors.status.danger, colors.status.health, colors.status.objective, colors.status.ammo, colors.status.neutral, colors.borderStrong]) {
+      expect(contrast(c, colors.background), `${c} on the background`).toBeGreaterThanOrEqual(LARGE);
+    }
+  });
+
+  test('HUD plates keep text readable over a pure white scene, the worst the camera can do', () => {
+    // A plate for critical (bone) text.
+    expect(contrast(colors.textPrimary, over(colors.camera.backing, WHITE))).toBeGreaterThanOrEqual(AA);
+    // A strong plate also carries secondary text and coloured marks.
+    const strong = over(colors.camera.backingStrong, WHITE);
+    expect(contrast(colors.textPrimary, strong)).toBeGreaterThanOrEqual(AA);
+    expect(contrast(colors.textSecondary, strong)).toBeGreaterThanOrEqual(AA);
+    expect(contrast(colors.status.health, strong)).toBeGreaterThanOrEqual(AA);
+    expect(contrast(colors.status.objective, strong)).toBeGreaterThanOrEqual(AA);
+    expect(contrast(colors.status.danger, strong)).toBeGreaterThanOrEqual(LARGE);
+    // Glass without blur falls back to a plate that is at least as dark.
+    expect(contrast(colors.textPrimary, over(colors.camera.glassFallback, WHITE))).toBeGreaterThanOrEqual(AA);
+    // And over a dark scene nothing is lost either.
+    expect(contrast(colors.textPrimary, over(colors.camera.backing, '#000000'))).toBeGreaterThanOrEqual(AA);
+  });
+
+  test('zombies read on light and on dark: a dark body, a rim that stands off it', () => {
+    for (const kind of ['walker', 'runner', 'brute', 'boss'] as const) {
+      expect(contrast(colors.zombies[kind], colors.zombies.body), `${kind} rim on its body`).toBeGreaterThanOrEqual(LARGE);
+    }
+    expect(contrast(colors.zombies.body, colors.sample.bright)).toBeGreaterThanOrEqual(7);
+    expect(contrast(colors.zombies.eye, colors.zombies.body)).toBeGreaterThanOrEqual(AA);
+  });
+
+  test('player identities: four colours that stand off the background, and four different shapes', () => {
+    expect(new Set(PLAYER_COLORS).size).toBe(4);
+    for (const c of PLAYER_COLORS) {
+      expect(contrast(c, colors.background)).toBeGreaterThanOrEqual(AA);
+      expect(contrast(colors.background, c), 'the slot number on the marker').toBeGreaterThanOrEqual(AA);
+    }
+    expect(new Set(MARKER_SHAPES).size).toBe(4);
+    const zombieCues = [colors.zombies.walker, colors.zombies.runner, colors.zombies.brute, colors.zombies.boss] as string[];
+    // No zombie type borrows a player's colour.
+    for (const c of PLAYER_COLORS) expect(zombieCues).not.toContain(c);
+  });
+});
+
+test.describe('type and touch', () => {
+  test('nothing on the HUD is set smaller than 12 points, and critical values are far larger', () => {
+    for (const [name, step] of Object.entries(typeScale)) {
+      if (name.startsWith('hud')) expect(step.fontSize, name).toBeGreaterThanOrEqual(12);
+    }
+    expect(typeScale.hudHero.fontSize).toBeGreaterThanOrEqual(36);
+    expect(typeScale.hudPrimary.fontSize).toBeGreaterThanOrEqual(28);
+    expect(typeScale.hudValue.fontSize).toBeGreaterThanOrEqual(22);
+    expect(typeScale.hudLabel.fontSize).toBeGreaterThanOrEqual(16);
+  });
+
+  test('touch targets meet the minimums', () => {
+    expect(touch.min).toBeGreaterThanOrEqual(44);
+    expect(touch.hud).toBeGreaterThanOrEqual(56);
+    expect(touch.fire).toBeGreaterThanOrEqual(touch.hud);
+    expect(touch.reload).toBeGreaterThanOrEqual(touch.hud);
+    expect(hud.reference).toEqual({ width: 844, height: 390 });
+  });
+});
+
+test.describe('identity', () => {
+  test('a player keeps their slot, colour and shape wherever they appear', () => {
+    const roster = [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }];
+    expect(roster.map((p) => identityOf(p.id, roster).label)).toEqual(['P1', 'P2', 'P3', 'P4']);
+    expect(identityOf('c', roster)).toEqual(identityForSlot(2));
+    expect(identityOf('c', roster).color).toBe(colors.players.three);
+    // Someone the roster does not know yet falls back to the first slot rather than crashing.
+    expect(identityOf('zz', roster).slot).toBe(0);
+    expect(identityOf(undefined, roster).slot).toBe(0);
+  });
+});
+
+test.describe('what the screen says', () => {
+  test('a mission code is four capitals or digits, however it was typed or pasted', () => {
+    expect(normalizeCode('abcd')).toBe('ABCD');
+    expect(normalizeCode(' 7f-3k ')).toBe('7F3K');
+    expect(normalizeCode('abcdefg')).toBe('ABCD');
+    expect(normalizeCode('a!b')).toBe('AB');
+    expect(normalizeCode('')).toBe('');
+  });
+
+  test('health is a whole percentage', () => {
+    expect(healthPct(8, 8)).toBe(100);
+    expect(healthPct(7, 8)).toBe(88);
+    expect(healthPct(0, 8)).toBe(0);
+    expect(healthPct(-1, 8)).toBe(0);
+    expect(healthPct(3, 0)).toBe(0);
+  });
+
+  test('mission time reads as minutes and seconds', () => {
+    expect(clock(0)).toBe('0:00');
+    expect(clock(65.9)).toBe('1:05');
+    expect(clock(754)).toBe('12:34');
+  });
+
+  test('the extraction line counts the holders and says what is missing', () => {
+    expect(extractionLine(0, 2, 0)).toBe('0 of 2 holding. Aim at the helicopter code and hold.');
+    expect(extractionLine(1, 2, 0)).toBe('1 of 2 holding. Need one more.');
+    expect(extractionLine(2, 2, 0.4)).toBe('2 of 2 holding. Cover them.');
+    expect(extractionLine(1, 2, 0.4)).toBe('Paused. 1 of 2 holding. Need one more.');   // someone let go
+    expect(extractionLine(0, 2, 0.4)).toBe('Paused. 0 of 2 holding.');
+    expect(extractionLine(1, 1, 0.1)).toBe('1 of 1 holding. Cover them.');              // the last one standing
+    expect(extractionLine(1, 3, 0)).toBe('1 of 3 holding. Need two more.');
+  });
+});
+
+test.describe('brand marks', () => {
+  const pts = (s: string) => s.split(' ').map((p) => p.split(',').map(Number) as [number, number]);
+
+  test('the Formation is four identical segments, each a quarter turn from the last', () => {
+    for (const mark of [FORMATION, FORMATION_MICRO]) {
+      expect(mark).toHaveLength(4);
+      const first = pts(mark[0]);
+      mark.forEach((segment, q) => {
+        let turned = first;
+        for (let i = 0; i < q; i++) turned = turned.map(([x, y]) => [MARK_SIZE - y, x]);
+        expect(pts(segment)).toEqual(turned);
+        for (const [x, y] of pts(segment)) {
+          expect(x).toBeGreaterThanOrEqual(0); expect(x).toBeLessThanOrEqual(MARK_SIZE);
+          expect(y).toBeGreaterThanOrEqual(0); expect(y).toBeLessThanOrEqual(MARK_SIZE);
+        }
+      });
+    }
+  });
+
+  test('the segments leave the centre open', () => {
+    // No vertex of any segment comes inside the central void.
+    for (const segment of FORMATION) {
+      for (const [x, y] of pts(segment)) expect(Math.abs(x - 60) + Math.abs(y - 60)).toBeGreaterThanOrEqual(19);
+    }
+  });
+
+  test('the wordmark is one closed path, about five times as wide as it is tall', () => {
+    expect(WORDMARK.height).toBe(100);
+    expect(WORDMARK.width / WORDMARK.height).toBeGreaterThan(4.5);
+    expect(WORDMARK.width / WORDMARK.height).toBeLessThan(5.6);
+    // Seven letters, plus the counters of the O and the two Rs.
+    expect(WORDMARK.d.match(/M/g)).toHaveLength(10);
+    expect(WORDMARK.d.match(/Z/g)).toHaveLength(10);
+  });
+});

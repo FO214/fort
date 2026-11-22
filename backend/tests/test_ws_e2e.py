@@ -169,13 +169,13 @@ async def test_four_phones_fight_a_wave(server):
     assert set(welcome["classes"]) == set(CLASSES) and welcome["map"]["id"] == "arena"
 
     # Loadout and ready show up for everyone.
-    await bo.send(t="set_class", cls="light")
-    await di.send(t="set_class", cls="heavy")
+    await bo.send(t="set_class", cls="smg")
+    await di.send(t="set_class", cls="rifle")
     for c in (ada, bo, cy, di):
         await c.send(t="ready", ready=True)
     lobby = await cy.until("lobby", pred=lambda m: all(p["ready"] for p in m["players"]))
     assert {p["name"]: p["cls"] for p in lobby["players"]} == \
-        {"Ada": "regular", "Bo": "light", "Cy": "regular", "Di": "heavy"}
+        {"Ada": "pistol", "Bo": "smg", "Cy": "pistol", "Di": "rifle"}
 
     # Only the host starts. Her GPS fix anchors the arena for the whole squad.
     await bo.send(t="start")
@@ -193,7 +193,7 @@ async def test_four_phones_fight_a_wave(server):
     snap = await di.until("snap", pred=lambda m: {(p["x"], p["y"]) for p in m["p"]}
                           == set(spots.values()))
     assert {(p["x"], p["y"]) for p in snap["p"]} == set(spots.values())
-    assert bo.id in {p["id"] for p in snap["p"]} and di.me(snap)["max"] == CLASSES["heavy"].hp
+    assert bo.id in {p["id"] for p in snap["p"]} and di.me(snap)["max"] == CLASSES["rifle"].hp
 
     # The first wave arrives: 8 zombies for four players, identical on every phone.
     wave = await ada.until("wave", cleared=False)

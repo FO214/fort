@@ -1,46 +1,59 @@
 import React from 'react';
-import { StyleSheet, View, ViewStyle, useWindowDimensions } from 'react-native';
-import Svg, { Circle, Defs, RadialGradient, Stop } from 'react-native-svg';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { color } from '../theme';
+import { KeyboardAvoidingView, Platform, ScrollView, StyleProp, StyleSheet, View, ViewStyle, useWindowDimensions } from 'react-native';
+import Svg, { Polygon } from 'react-native-svg';
+import { SafeAreaView, type Edge } from 'react-native-safe-area-context';
+import { alpha, colors, space } from '../theme';
 
-/** The colour field the glass reads through on menu screens. */
-export function Blobs() {
-  const { width, height } = useWindowDimensions();
+/** Portrait content never runs wider than this, so it holds on a tablet or a phone turned sideways. */
+export const CONTENT_MAX = 480;
+
+/**
+ * The structural bands behind the menu screens: two flat diagonals cut on the
+ * wordmark's angle. One tone lighter than the background, no gradient.
+ */
+export function Backdrop() {
+  const { width: w, height: h } = useWindowDimensions();
+  const band = alpha(colors.textPrimary, 0.022);
+  const run = h * 0.9;                       // how far a band travels across as it climbs
+  const poly = (x: number, bw: number) => `${x},${h} ${x + bw},${h} ${x + bw + run},0 ${x + run},0`;
   return (
-    <Svg width={width} height={height} style={StyleSheet.absoluteFill} pointerEvents="none">
-      <Defs>
-        <RadialGradient id="teal" cx="50%" cy="50%" r="50%">
-          <Stop offset="0" stopColor={color.blobTeal} stopOpacity="0.85" />
-          <Stop offset="1" stopColor={color.blobTeal} stopOpacity="0" />
-        </RadialGradient>
-        <RadialGradient id="violet" cx="50%" cy="50%" r="50%">
-          <Stop offset="0" stopColor={color.blobViolet} stopOpacity="0.9" />
-          <Stop offset="1" stopColor={color.blobViolet} stopOpacity="0" />
-        </RadialGradient>
-        <RadialGradient id="blue" cx="50%" cy="50%" r="50%">
-          <Stop offset="0" stopColor={color.blobBlue} stopOpacity="0.8" />
-          <Stop offset="1" stopColor={color.blobBlue} stopOpacity="0" />
-        </RadialGradient>
-      </Defs>
-      <Circle cx={width * 0.15} cy={height * 0.12} r={width * 0.7} fill="url(#teal)" />
-      <Circle cx={width * 0.95} cy={height * 0.42} r={width * 0.8} fill="url(#violet)" />
-      <Circle cx={width * 0.3} cy={height * 0.95} r={width * 0.75} fill="url(#blue)" />
+    <Svg width={w} height={h} style={StyleSheet.absoluteFill} pointerEvents="none">
+      <Polygon points={poly(-run * 0.72, w * 0.36)} fill={band} />
+      <Polygon points={poly(-run * 0.16, w * 0.14)} fill={band} />
+      <Polygon points={poly(w * 0.34 - run * 0.1, w * 0.5)} fill={alpha(colors.textPrimary, 0.014)} />
     </Svg>
   );
 }
 
-export function Screen({ children, blobs = true, style, edges }:
-  { children: React.ReactNode; blobs?: boolean; style?: ViewStyle; edges?: ('top' | 'bottom' | 'left' | 'right')[] }) {
+/**
+ * The frame every portrait screen sits in: obsidian background, safe areas,
+ * a centred column. `scroll` makes the column scrollable and keeps the
+ * focused field above the keyboard.
+ */
+export function Screen({ children, backdrop, scroll, edges, style, contentStyle, testID }: {
+  children: React.ReactNode; backdrop?: boolean; scroll?: boolean; edges?: Edge[];
+  style?: StyleProp<ViewStyle>; contentStyle?: StyleProp<ViewStyle>; testID?: string;
+}) {
+  const column = [styles.column, contentStyle];
   return (
-    <View style={[styles.root, style]}>
-      {blobs && <Blobs />}
-      <SafeAreaView style={styles.safe} edges={edges}>{children}</SafeAreaView>
+    <View style={[styles.root, style]} testID={testID}>
+      {backdrop ? <Backdrop /> : null}
+      <SafeAreaView style={styles.safe} edges={edges}>
+        {scroll ? (
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.safe}>
+            <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+              <View style={column}>{children}</View>
+            </ScrollView>
+          </KeyboardAvoidingView>
+        ) : <View style={[styles.safe, column]}>{children}</View>}
+      </SafeAreaView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: color.bg },
+  root: { flex: 1, backgroundColor: colors.background },
   safe: { flex: 1 },
+  scroll: { flexGrow: 1 },
+  column: { flexGrow: 1, width: '100%', maxWidth: CONTENT_MAX, alignSelf: 'center', paddingHorizontal: space[6] },
 });

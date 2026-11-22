@@ -23,15 +23,20 @@ class GunClass(BaseModel):
     hp: int                  # the player's health with this loadout
 
 
+# Four loadouts, in the order the lobby shows them. Pistol, SMG and rifle
+# carry the numbers of the original regular / light / heavy classes; the
+# shotgun is the close-range option: wide aim forgiveness, short reach.
 CLASSES: dict[str, GunClass] = {
-    "light": GunClass(id="light", name="Light", damage=1, fire_interval_s=0.12, magazine=24,
-                      reload_s=2.2, spread_deg=3.0, range_m=25, automatic=True, hp=6),
-    "regular": GunClass(id="regular", name="Regular", damage=2, fire_interval_s=0.4, magazine=10,
-                        reload_s=2.6, spread_deg=2.0, range_m=35, automatic=False, hp=8),
-    "heavy": GunClass(id="heavy", name="Heavy", damage=4, fire_interval_s=0.9, magazine=5,
+    "pistol": GunClass(id="pistol", name="Pistol", damage=2, fire_interval_s=0.4, magazine=10,
+                       reload_s=2.6, spread_deg=2.0, range_m=35, automatic=False, hp=8),
+    "smg": GunClass(id="smg", name="SMG", damage=1, fire_interval_s=0.12, magazine=24,
+                    reload_s=2.2, spread_deg=3.0, range_m=25, automatic=True, hp=6),
+    "shotgun": GunClass(id="shotgun", name="Shotgun", damage=3, fire_interval_s=0.7, magazine=6,
+                        reload_s=3.0, spread_deg=5.0, range_m=12, automatic=False, hp=9),
+    "rifle": GunClass(id="rifle", name="Rifle", damage=4, fire_interval_s=0.9, magazine=5,
                       reload_s=3.4, spread_deg=1.0, range_m=50, automatic=False, hp=10),
 }
-DEFAULT_CLASS = "regular"
+DEFAULT_CLASS = "pistol"
 
 
 # --------------------------------------------------------------------- settings

@@ -48,17 +48,17 @@ def test_lobby_rules():
     r.add_player("Di")
     with pytest.raises(GameError, match="full"):
         r.add_player("Eve")                    # four is a full squad
-    r.set_class(b.id, "heavy")
+    r.set_class(b.id, "rifle")
     with pytest.raises(GameError):
         r.set_class(b.id, "bazooka")
     started = r.start(a.id, 1)
     assert r.phase == "playing" and started["t"] == "started"
     assert started["map"]["id"] == "arena" and started["mission"]["phase"] == "journey"
-    assert b.hp == CLASSES["heavy"].hp and b.ammo == CLASSES["heavy"].magazine
+    assert b.hp == CLASSES["rifle"].hp and b.ammo == CLASSES["rifle"].magazine
     with pytest.raises(GameError):
         r.add_player("Late")
     with pytest.raises(GameError):
-        r.set_class(b.id, "light")             # loadout is locked now
+        r.set_class(b.id, "smg")             # loadout is locked now
 
 
 def test_solo_start_is_allowed():
@@ -99,7 +99,7 @@ def test_a_shot_on_target_hurts_the_zombie():
     assert kinds(ev) == ["fired", "zhit"]
     assert ev[0]["reason"] == "hit" and ev[0]["hits"] == [[z.id, WALKER.hp - 2]]
     assert ev[1] == {"t": "zhit", "id": z.id, "hp": WALKER.hp - 2, "by": a.id, "dmg": 2}
-    assert a.ammo == CLASSES["regular"].magazine - 1 and a.shots == 1 and a.damage == 2
+    assert a.ammo == CLASSES["pistol"].magazine - 1 and a.shots == 1 and a.damage == 2
 
 
 def test_killing_a_zombie_is_announced_and_credited():
@@ -115,7 +115,7 @@ def test_killing_a_zombie_is_announced_and_credited():
     assert ev[2] == {"t": "zkill", "id": z.id, "by": a.id, "x": 0, "y": 10}
     assert z.id not in r.world.zombies and a.kills == 1
     late = r.fire(a.id, 9, [z.id], 0.0, t)              # someone else's bullet got there first
-    assert late[0]["reason"] == "gone" and a.ammo == CLASSES["regular"].magazine - 4
+    assert late[0]["reason"] == "gone" and a.ammo == CLASSES["pistol"].magazine - 4
 
 
 def test_empty_trigger_pull_is_a_miss_that_costs_a_round():
@@ -123,7 +123,7 @@ def test_empty_trigger_pull_is_a_miss_that_costs_a_round():
     r.start(a.id, T0)
     ev = r.fire(a.id, 1, [], 45.0, T0 + 1)
     assert ev == [{"t": "fired", "player_id": a.id, "seq": 1, "reason": "miss",
-                   "ammo": CLASSES["regular"].magazine - 1, "hits": []}]
+                   "ammo": CLASSES["pistol"].magazine - 1, "hits": []}]
     assert a.heading == 45.0                            # the shot tells us where the gun points
 
 
@@ -142,7 +142,7 @@ def test_out_of_range():
     r, a, _ = make_room()
     r.start(a.id, T0)
     place(r, a, 0, 0)
-    z = r.world.spawn(WALKER, 0, 60)                    # regular reaches 35 m
+    z = r.world.spawn(WALKER, 0, 60)                    # the pistol reaches 35 m
     assert r.fire(a.id, 1, [z.id], 0.0, T0 + 1)[0]["reason"] == "range"
     assert z.hp == WALKER.hp
 
@@ -159,7 +159,7 @@ def test_one_bullet_hits_one_zombie():
 def test_fire_rate_magazine_and_reload():
     r, a, _ = make_room()
     r.start(a.id, T0)
-    w = CLASSES["regular"]
+    w = CLASSES["pistol"]
     assert r.fire(a.id, 1, [], 0, T0 + 1)[0]["reason"] == "miss"
     assert r.fire(a.id, 2, [], 0, T0 + 1.1)[0]["reason"] == "cooldown"
     assert r.fire(a.id, 2, [], 0, T0 + 5)  == []        # duplicate sequence number

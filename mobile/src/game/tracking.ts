@@ -135,9 +135,13 @@ class Tracking {
 export const tracking = new Tracking();
 if (typeof window !== 'undefined') (window as unknown as { __loonieTracking?: unknown }).__loonieTracking = tracking;
 
-/** Keeps the sensors running while mounted; while `sending`, reports to the server. */
-export function useTracking(sending: boolean): void {
-  useEffect(() => tracking.acquire(), []);
+/**
+ * Keeps the sensors running while mounted; while `sending`, reports to the
+ * server. Starting the sensors is what makes the OS ask for location, so
+ * `enabled` holds that back until the player has been told why.
+ */
+export function useTracking(sending: boolean, enabled = true): void {
+  useEffect(() => (enabled ? tracking.acquire() : undefined), [enabled]);
 
   // Each `started` message (a new mission, or a reconnect) re-anchors the map.
   const missionSeq = useStore((s) => s.missionSeq);

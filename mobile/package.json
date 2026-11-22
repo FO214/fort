@@ -3,11 +3,17 @@
   "version": "1.0.0",
   "main": "index.ts",
   "dependencies": {
+    "@expo-google-fonts/barlow-condensed": "^0.4.1",
+    "@expo-google-fonts/ibm-plex-mono": "^0.4.2",
+    "@expo-google-fonts/ibm-plex-sans": "^0.4.1",
     "@expo/metro-runtime": "~57.0.16",
     "@react-native-async-storage/async-storage": "^2.2.0",
     "expo": "~57.0.24",
+    "expo-asset": "~57.0.18",
+    "expo-audio": "~57.0.5",
     "expo-blur": "~57.0.3",
     "expo-camera": "~57.0.5",
+    "expo-clipboard": "~57.0.2",
     "expo-constants": "~57.0.19",
     "expo-font": "~57.0.4",
     "expo-haptics": "~57.0.3",
@@ -41,12 +47,14 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "typecheck": "tsc --noEmit -p . && tsc --noEmit -p e2e",
+    "typecheck": "tsc --noEmit -p . && tsc --noEmit -p e2e && tsc --noEmit -p scripts",
     "export:web": "expo export --platform web --output-dir dist",
     "e2e": "npm run export:web && playwright test -c e2e/playwright.config.ts",
     "e2e:only": "playwright test -c e2e/playwright.config.ts",
     "test:logic": "LOGIC_ONLY=1 playwright test -c e2e/playwright.config.ts logic",
-    "heli-qr": "node scripts/make-heli-qr.mjs"
+    "heli-qr": "node scripts/make-heli-qr.mjs",
+    "brand": "node scripts/make-brand-assets.mts",
+    "sounds": "node scripts/make-sounds.mts"
   },
   "private": true
 }

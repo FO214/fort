@@ -7,6 +7,21 @@ export type AppPhase = 'menu' | 'join' | 'lobby' | 'playing' | 'summary';
 export type Connection = 'idle' | 'connecting' | 'open' | 'reconnecting' | 'closed';
 
 export interface FeedItem { key: string; at: number; text: string; detail?: string; tone: 'good' | 'bad' | 'plain' }
+/** A mission-level moment worth a banner: a wave starting, the objective changing. */
+export interface Banner { key: string; at: number; title: string; detail?: string; tone: 'objective' | 'danger' | 'neutral' }
+/**
+ * The player's physical gun.
+ *   none      never paired
+ *   pairing   the 10 s window is open, waiting for a trigger pull
+ *   paired    a gun answered and is connected
+ *   timeout   the window closed with no gun
+ *   lost      a paired gun dropped off the network
+ */
+export type GunLink = 'none' | 'pairing' | 'paired' | 'timeout' | 'lost';
+export interface Prefs { haptics: boolean; sound: boolean; hudScale: number }
+export const HUD_SCALES = [0.9, 1, 1.12] as const;
+/** The server's pairing window (backend/app/devices.py, PAIR_WINDOW_S). */
+export const PAIR_WINDOW_S = 10;
 export interface ShotFeedback { key: number; at: number; kind: 'hit' | 'kill' | 'miss'; reason: string }
 export interface Damage { key: number; at: number; dir: number | null; damage: number; hp: number }
 
@@ -48,15 +63,31 @@ interface State {
   shots: ShotFeedback[];
   damages: Damage[];
   feed: FeedItem[];
+  banner: Banner | null;
   ended: EndedMsg | null;
+  /**
+   * False from the moment the host starts until this player has turned the
+   * phone, mounted it and counted in. A phone that rejoins a mission already
+   * under way skips straight to the HUD.
+   */
+  deployed: boolean;
+  setDeployed: (v: boolean) => void;
 
   gpsAcc: number | null;       // newest reported GPS accuracy, null before the first fix
   hasCompass: boolean;
   sensorError: string | null;
-  /** The player's physical gun: none, waiting for its first trigger pull, or paired and connected. */
-  gun: 'none' | 'pairing' | 'paired';
+  gun: GunLink;
+  /** `Date.now() / 1000` at which the pairing window closes. */
+  pairingUntil: number;
   /** Call after sending pair_gun; shows "pairing" until a gun answers or the window closes. */
   startPairing: () => void;
+  /** `Date.now() / 1000` when the link to the server dropped, 0 while it is up. */
+  lostAt: number;
+  prefs: Prefs;
+  setPrefs: (p: Partial<Prefs>) => void;
+  /** The design-system gallery is open (a QA screen, not part of the game). */
+  gallery: boolean;
+  setGallery: (v: boolean) => void;
 
   setName: (n: string) => void;
   setServerUrl: (u: string) => void;
@@ -72,6 +103,10 @@ interface State {
 }
 
 const KEY = 'loonie.prefs.v2';
+const DEFAULT_PREFS: Prefs = { haptics: true, sound: true, hudScale: 1 };
+/** Tests and the walkthrough can skip the deploy sequence with `?deploy=skip`. */
+const SKIP_DEPLOY = typeof window !== 'undefined' && !!window.location?.search
+  && new URLSearchParams(window.location.search).get('deploy') === 'skip';
 const DEFAULT_URL = 'ws://localhost:8000/ws';
 const NO_MISSION: MissionState = { phase: 'journey', wave: 0, left: 0, total: 0, hold: [0, 2] };
 const NO_EXTRACT = { progress: 0, need: 2, holders: [] as string[] };
@@ -97,6 +132,9 @@ function defaultServerUrl(): string {
 let feedback = 0;
 const feedItem = (text: string, tone: FeedItem['tone'], detail?: string): FeedItem =>
   ({ key: `f${++feedback}`, at: Date.now() / 1000, text, detail, tone });
+const bannerOf = (title: string, tone: Banner['tone'], detail?: string): Banner =>
+  ({ key: `b${++feedback}`, at: Date.now() / 1000, title, detail, tone });
+let pairTimer: ReturnType<typeof setTimeout> | null = null;
 
 export const useStore = create<State>((set, get) => ({
   phase: 'menu',
@@ -123,24 +161,37 @@ export const useStore = create<State>((set, get) => ({
   shots: [],
   damages: [],
   feed: [],
+  banner: null,
   ended: null,
+  deployed: true,
   gpsAcc: null,
   hasCompass: false,
   sensorError: null,
   gun: 'none',
+  pairingUntil: 0,
+  lostAt: 0,
+  prefs: DEFAULT_PREFS,
+  gallery: typeof window !== 'undefined' && !!window.location?.search && new URLSearchParams(window.location.search).get('gallery') === '1',
+  setGallery: (gallery) => set({ gallery }),
 
   setName: (name) => { set({ name }); persist(get); },
   setServerUrl: (serverUrl) => { set({ serverUrl }); persist(get); },
   setPhase: (phase) => set({ phase }),
   setError: (error) => set({ error }),
-  setConnection: (connection) => set({ connection }),
+  setConnection: (connection) => set((st) => ({
+    connection,
+    lostAt: connection === 'open' || connection === 'idle' ? 0 : st.lostAt || Date.now() / 1000,
+  })),
+  setDeployed: (deployed) => set({ deployed }),
+  setPrefs: (p) => { set((st) => ({ prefs: { ...st.prefs, ...p } })); persist(get); },
   setGpsAcc: (gpsAcc) => set({ gpsAcc }),
   setHasCompass: (hasCompass) => set({ hasCompass }),
   setSensorError: (sensorError) => set({ sensorError }),
   startPairing: () => {
-    set({ gun: 'pairing' });
-    // The server's window is 10 s; give up on screen a moment after.
-    setTimeout(() => { if (get().gun === 'pairing') set({ gun: 'none' }); }, 11000);
+    set({ gun: 'pairing', pairingUntil: Date.now() / 1000 + PAIR_WINDOW_S });
+    // The server closes its window at 10 s; say so on screen a moment after.
+    if (pairTimer) clearTimeout(pairTimer);
+    pairTimer = setTimeout(() => { if (get().gun === 'pairing') set({ gun: 'timeout' }); }, PAIR_WINDOW_S * 1000 + 600);
   },
 
   handle: (m) => {
@@ -175,7 +226,11 @@ export const useStore = create<State>((set, get) => ({
         set({
           phase: 'playing', roomPhase: 'playing', map: m.map, mission: m.mission, serverOffset: m.now - now,
           missionSeq: s.missionSeq + 1, ended: null,
-          ...(fresh ? { ammo: cls?.magazine ?? 0, reloadingUntil: 0, shots: [], damages: [], feed: [], squad: [], zombieCount: 0, extract: NO_EXTRACT } : {}),
+          ...(fresh ? {
+            ammo: cls?.magazine ?? 0, reloadingUntil: 0, shots: [], damages: [], feed: [], banner: null, squad: [], zombieCount: 0, extract: NO_EXTRACT,
+            // Only a start seen from the lobby needs the phone turned and mounted.
+            deployed: SKIP_DEPLOY || s.phase !== 'lobby',
+          } : {}),
         });
         return;
       }
@@ -216,7 +271,7 @@ export const useStore = create<State>((set, get) => ({
         return;
       }
       case 'knocked':
-        set({ feed: [...s.feed.slice(-5), feedItem(m.player_id === myId ? 'You' : m.name, 'bad', 'knocked')] });
+        set({ feed: [...s.feed.slice(-5), feedItem(m.player_id === myId ? 'You' : m.name, 'bad', m.player_id === myId ? 'are knocked' : 'is knocked')] });
         return;
       case 'revived':
         set({ feed: [...s.feed.slice(-5), feedItem(m.by === myId ? 'You' : m.by_name, 'good', `revived ${m.player_id === myId ? 'you' : m.name}`)] });
@@ -225,9 +280,9 @@ export const useStore = create<State>((set, get) => ({
         set({ feed: [...s.feed.slice(-5), feedItem(m.player_id === myId ? 'You' : m.name, 'bad', m.player_id === myId ? 'are dead' : 'is dead')] });
         return;
       case 'phase': {
-        const item = m.phase === 'holdout' ? feedItem('Helicopter reached', 'good', `hold for ${m.hold?.[1] ?? 2} waves`)
-          : m.phase === 'final' ? feedItem('Final wave', 'bad', 'extract now') : null;
-        set({ mission: { ...s.mission, phase: m.phase, hold: m.hold ?? s.mission.hold }, ...(item ? { feed: [...s.feed.slice(-5), item] } : {}) });
+        const banner = m.phase === 'holdout' ? bannerOf('Hold the zone', 'objective', `Helicopter reached. Survive ${m.hold?.[1] ?? 2} waves.`)
+          : m.phase === 'final' ? bannerOf('Final wave', 'danger', 'Extract now') : null;
+        set({ mission: { ...s.mission, phase: m.phase, hold: m.hold ?? s.mission.hold }, ...(banner ? { banner } : {}) });
         return;
       }
       case 'extract':
@@ -235,11 +290,15 @@ export const useStore = create<State>((set, get) => ({
         return;
       case 'wave': {
         const label = m.phase === 'final' ? 'Final wave' : `Wave ${m.n}`;
-        set({ feed: [...s.feed.slice(-5), m.cleared ? feedItem(label, 'good', 'cleared') : feedItem(label, 'plain', `${m.count ?? ''} incoming`)] });
+        if (m.cleared) set({ banner: bannerOf(`${label} cleared`, 'neutral', m.next_in ? `Next wave in ${Math.round(m.next_in)} s` : undefined) });
+        // The final wave is announced by the phase change; do not say it twice.
+        else if (m.phase !== 'final') set({ banner: bannerOf(label, 'objective', m.count ? `${m.count} incoming` : undefined) });
         return;
       }
       case 'gun':
-        set({ gun: m.on ? 'paired' : 'none' });
+        // Only the gun itself says "paired"; a gun that was paired and drops is "lost".
+        if (pairTimer && m.on) { clearTimeout(pairTimer); pairTimer = null; }
+        set({ gun: m.on ? 'paired' : s.gun === 'paired' || s.gun === 'lost' ? 'lost' : s.gun });
         return;
       case 'reload':
         if (m.player_id === myId) set({ reloadingUntil: m.until });
@@ -263,8 +322,8 @@ export const useStore = create<State>((set, get) => ({
     zombies.clear();
     set({
       phase: 'menu', session: null, hostId: null, roster: [], settings: null, roomPhase: 'lobby',
-      ended: null, feed: [], shots: [], damages: [], squad: [], mission: NO_MISSION, extract: NO_EXTRACT, zombieCount: 0,
-      error: null, connection: 'idle', gun: 'none',
+      ended: null, feed: [], banner: null, shots: [], damages: [], squad: [], mission: NO_MISSION, extract: NO_EXTRACT, zombieCount: 0,
+      error: null, connection: 'idle', lostAt: 0, gun: 'none', deployed: true,
     });
     persist(get, null);
   },
@@ -273,9 +332,10 @@ export const useStore = create<State>((set, get) => ({
     try {
       const raw = await AsyncStorage.getItem(KEY);
       if (!raw) return;
-      const p = JSON.parse(raw) as { name?: string; serverUrl?: string; session?: Session | null };
+      const p = JSON.parse(raw) as { name?: string; serverUrl?: string; session?: Session | null; prefs?: Partial<Prefs> };
       const pinned = typeof window !== 'undefined' && !!window.location?.search && new URLSearchParams(window.location.search).has('server');
       set({ name: p.name ?? '', serverUrl: pinned ? get().serverUrl : p.serverUrl ?? get().serverUrl });
+      if (p.prefs) set({ prefs: { ...DEFAULT_PREFS, ...p.prefs } });
       if (p.session) set({ session: p.session });
     } catch { /* first run */ }
   },
@@ -283,7 +343,7 @@ export const useStore = create<State>((set, get) => ({
 
 async function persist(get: () => State, session?: Session | null) {
   const s = get();
-  const payload = { name: s.name, serverUrl: s.serverUrl, session: session === undefined ? s.session : session };
+  const payload = { name: s.name, serverUrl: s.serverUrl, prefs: s.prefs, session: session === undefined ? s.session : session };
   try { await AsyncStorage.setItem(KEY, JSON.stringify(payload)); } catch { /* storage unavailable */ }
 }
 
