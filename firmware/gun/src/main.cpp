@@ -51,6 +51,7 @@ static void onEvent(WStype_t type, uint8_t* payload, size_t len) {
 }
 
 void setup() {
+  setCpuFrequencyMhz(80);                                 // plenty for two buttons; Wi-Fi needs >= 80
   Serial.begin(115200);
   for (auto& b : buttons) pinMode(b.pin, INPUT_PULLUP);
 #ifdef PIN_RELOAD_GND
@@ -66,6 +67,7 @@ void setup() {
   for (int i = 0; i < n; i++) Serial.printf("  [%s] %d dBm\n", WiFi.SSID(i).c_str(), WiFi.RSSI(i));
   Serial.printf("wifi: joining [%s]\n", WIFI_SSID);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
+  WiFi.setTxPower(WIFI_POWER_8_5dBm);                     // the hotspot phone is within arm's reach; full power only makes heat
   uint8_t mac[6];
   WiFi.macAddress(mac);
   char id[16];
@@ -113,6 +115,8 @@ void loop() {
   }
   if (now - lastAlive > 3000) { lastAlive = now; Serial.println("alive"); }
 #endif
+  static uint32_t lastTemp = 0;
+  if (now - lastTemp > 10000) { lastTemp = now; Serial.printf("temp: %.1f C  rssi %d dBm\n", temperatureRead(), (int)WiFi.RSSI()); }
   for (auto& b : buttons) {
     bool raw = digitalRead(b.pin) == LOW;                 // pressed pulls the pin to ground
     if (raw != b.lastRaw) { b.lastRaw = raw; b.changedAt = now; }
@@ -122,4 +126,5 @@ void loop() {
       sendBtn(b);
     }
   }
+  delay(1);                                               // let the CPU idle between polls
 }
