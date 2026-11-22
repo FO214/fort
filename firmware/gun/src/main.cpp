@@ -116,7 +116,7 @@ void loop() {
   if (now - lastAlive > 3000) { lastAlive = now; Serial.println("alive"); }
 #endif
   static uint32_t lastTemp = 0;
-  if (now - lastTemp > 10000) { lastTemp = now; Serial.printf("temp: %.1f C\n", temperatureRead()); }
+  if (now - lastTemp > 10000) { lastTemp = now; Serial.printf("temp: %.1f C  rssi %d dBm\n", temperatureRead(), (int)WiFi.RSSI()); }
   for (auto& b : buttons) {
     bool raw = digitalRead(b.pin) == LOW;                 // pressed pulls the pin to ground
     if (raw != b.lastRaw) { b.lastRaw = raw; b.changedAt = now; }
