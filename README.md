@@ -57,7 +57,7 @@ The helicopter sign to print is `docs/helicopter-qr.svg` (regenerate with
 cd backend && python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
 
-# app (another terminal), then open in Expo Go on each phone
+# app (another terminal), then open in Expo Go on each phone. Needs Node 22.13 or newer.
 cd mobile && npm install && npx expo start
 ```
 

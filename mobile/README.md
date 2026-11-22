@@ -6,6 +6,13 @@ middle of the screen is the gun sight.
 
 ## Run it on phones (Expo Go)
 
+The app is on **Expo SDK 58** (React Native 0.88), which is what the current
+Expo Go from the App Store and Play Store opens.
+
+**You need Node.js 22.13 or newer** (24.3+ and 26+ also work). On an older
+Node the dev server stops at startup with `URL.parse is not a function`.
+Check with `node --version`; get the LTS installer from nodejs.org.
+
 1. **Server.** On a laptop, from `../backend`:
    ```sh
    python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
@@ -25,6 +32,17 @@ middle of the screen is the gun sight.
 
 Camera and motion sensors need Expo Go (or https). A phone browser on plain
 http will not get them.
+
+If the mission screen does not turn sideways on an iPhone, switch off
+Portrait Orientation Lock in Control Centre. On iOS 27 the system can refuse
+an app's request to lock the screen (it does so under iPhone Mirroring), and
+the game then follows however the phone is held.
+
+**No newer Node yet?** The web build still works on Node 20, for a quick
+check in a phone browser without camera or compass:
+```sh
+npm run export:web && npx serve -s dist -l 8081
+```
 
 ## How the phone knows where things are
 
