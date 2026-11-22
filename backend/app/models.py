@@ -71,6 +71,12 @@ class SetClass(BaseModel):
     cls: str
 
 
+class SetMap(BaseModel):
+    """Host only, in the lobby: which map the mission is played on."""
+    t: Literal["set_map"]
+    map: str = Field(pattern=r"^[a-z0-9_-]{1,32}$")
+
+
 class Start(BaseModel):
     """Host starts the mission. On a map with no fixed real-world origin (the
     open arena) the host's current GPS fix becomes the origin for everyone."""

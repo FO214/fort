@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ZombieBuffer } from './game/zombies';
-import type { EndedMsg, GunClass, LobbyPlayer, MapInfo, MissionState, PlayerSnap, RoomPhase, ServerMsg, Settings } from './net/types';
+import type { EndedMsg, GunClass, LobbyPlayer, MapChoice, MapInfo, MissionState, PlayerSnap, RoomPhase, ServerMsg, Settings } from './net/types';
 
 export type AppPhase = 'menu' | 'join' | 'lobby' | 'playing' | 'summary';
 export type Connection = 'idle' | 'connecting' | 'open' | 'reconnecting' | 'closed';
@@ -32,6 +32,8 @@ interface State {
   roster: LobbyPlayer[];
   roomPhase: RoomPhase;
   map: MapInfo | null;
+  /** Every map the server offers, for the host's picker in the lobby. */
+  maps: MapChoice[];
   serverOffset: number;        // seconds to add to Date.now()/1000 to get server time
 
   /** Bumped by every `started`, so the tracker knows to re-anchor the map. */
@@ -105,6 +107,7 @@ export const useStore = create<State>((set, get) => ({
   roster: [],
   roomPhase: 'lobby',
   map: null,
+  maps: [],
   serverOffset: 0,
   missionSeq: 0,
   mission: NO_MISSION,
@@ -137,12 +140,14 @@ export const useStore = create<State>((set, get) => ({
     switch (m.t) {
       case 'welcome': {
         const session = { code: m.code, playerId: m.player_id, token: m.token };
-        set({ session, hostId: m.host_id, classes: m.classes, map: m.map, error: null, connection: 'open' });
+        set({ session, hostId: m.host_id, classes: m.classes, map: m.map, maps: m.maps ?? [], error: null, connection: 'open' });
         persist(get, session);
         return;
       }
       case 'lobby': {
         const next: Partial<State> = { hostId: m.host_id, settings: m.settings, roster: m.players, roomPhase: m.phase };
+        // In the lobby the host may switch maps. Mid-mission `started` owns the map (it carries the anchor).
+        if (m.phase === 'lobby' && m.map) next.map = m.map;
         if (m.phase === 'lobby' && (s.phase === 'playing' || s.phase === 'summary')) {
           // Host sent everyone back to the lobby (play again, or an abort).
           next.phase = 'lobby'; next.ended = null;

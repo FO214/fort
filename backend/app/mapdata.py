@@ -1,8 +1,27 @@
 """Map files. A map is a flat plane in metres plus the things placed on it:
 where the squad starts, where the helicopter is, and where zombies come from.
 
-The open arena is the only map for now. A real building adds walls, a
-corridor graph and fixed spawn points in the same file format (build step 5).
+Two kinds of map share one file format:
+
+* The open arena: no walls, no fixed place in the world. Zombies spawn in a
+  ring around the squad and walk in straight lines.
+* A building: an outline and walls in metres, a corridor graph for zombies
+  to follow, fixed spawn points, and an origin that pins it to real
+  latitude/longitude.
+
+Map file keys (all distances in metres, x right and y up):
+
+    id, name            identifier and display name
+    origin              [lat, lon] of map (0, 0), or null
+    rotation_deg        compass bearing of the +y axis
+    start               [x, y] where the squad begins
+    helicopter          {x, y, radius_m, qr}
+    outline             [[x, y], ...] building footprint, for drawing
+    walls               [[x1, y1, x2, y2], ...] things zombies cannot walk through
+    labels              [{"text", "x", "y"}, ...] room names, for drawing
+    graph               {"nodes": {name: [x, y]}, "edges": [[a, b], ...]}
+    spawn               {"mode": "ring" | "points", "min_m", "max_m"}
+    spawn_points        [[x, y], ...] used when mode is "points"
 """
 from __future__ import annotations
 
@@ -14,6 +33,7 @@ from pathlib import Path
 from typing import Any, Optional, Sequence
 
 from .geo import dist_xy, from_local, to_local
+from .nav import Nav
 
 MAPS_DIR = Path(__file__).resolve().parent.parent / "maps"
 
@@ -40,8 +60,11 @@ class MapData:
     spawn_min_m: float = 14.0
     spawn_max_m: float = 20.0
     spawn_points: list[Point] = field(default_factory=list)
-    walls: list[Any] = field(default_factory=list)
+    outline: list[Point] = field(default_factory=list)
+    walls: list[tuple[float, float, float, float]] = field(default_factory=list)
+    labels: list[dict[str, Any]] = field(default_factory=list)
     graph: Optional[dict[str, Any]] = None
+    nav: Optional[Nav] = field(default=None, compare=False, repr=False)
 
     # ---- construction ----------------------------------------------------
     @classmethod
@@ -49,6 +72,12 @@ class MapData:
         h = d["helicopter"]
         sp = d.get("spawn") or {}
         origin = d.get("origin")
+        walls = [(float(w[0]), float(w[1]), float(w[2]), float(w[3])) for w in d.get("walls", [])]
+        graph = d.get("graph") or None
+        nav = None
+        if walls or graph:
+            # Raises if a corridor edge runs through a wall: catch a bad map at load, not mid-game.
+            nav = Nav(walls, (graph or {}).get("nodes"), [tuple(e) for e in (graph or {}).get("edges", [])])
         return cls(
             id=d["id"], name=d.get("name", d["id"]),
             start=(float(d["start"][0]), float(d["start"][1])),
@@ -60,8 +89,11 @@ class MapData:
             spawn_min_m=float(sp.get("min_m", 14.0)),
             spawn_max_m=float(sp.get("max_m", 20.0)),
             spawn_points=[(float(p[0]), float(p[1])) for p in d.get("spawn_points", [])],
-            walls=list(d.get("walls", [])),
-            graph=d.get("graph"),
+            outline=[(float(p[0]), float(p[1])) for p in d.get("outline", [])],
+            walls=walls,
+            labels=[{"text": str(lb["text"]), "x": float(lb["x"]), "y": float(lb["y"])} for lb in d.get("labels", [])],
+            graph=graph,
+            nav=nav,
         )
 
     def with_origin(self, lat: float, lon: float) -> "MapData":
@@ -80,7 +112,9 @@ class MapData:
             "rotation_deg": self.rotation_deg,
             "start": list(self.start),
             "helicopter": {"x": h.x, "y": h.y, "radius_m": h.radius_m, "qr": h.qr},
-            "walls": self.walls,
+            "outline": [list(p) for p in self.outline],
+            "walls": [list(w) for w in self.walls],
+            "labels": self.labels,
         }
 
     # ---- coordinates -------------------------------------------------------
@@ -110,12 +144,17 @@ class MapData:
         if self.spawn_mode == "points" and self.spawn_points:
             far_enough = [p for p in self.spawn_points if clearance(p) >= self.spawn_min_m]
             if far_enough:
-                # Prefer the nearer half so zombies do not spend the whole wave walking in.
-                far_enough.sort(key=lambda p: dist_xy(p[0], p[1], centre[0], centre[1]))
+                # Prefer the nearer half (by corridor, not through walls) so
+                # zombies do not spend the whole wave walking in.
+                walk = self.nav.route_length if self.nav else (lambda p, q: dist_xy(p[0], p[1], q[0], q[1]))
+                far_enough.sort(key=lambda p: walk(p, centre))
                 pick = rng.choice(far_enough[: max(1, (len(far_enough) + 1) // 2)])
             else:
                 pick = max(self.spawn_points, key=clearance)
-            return (pick[0] + rng.uniform(-1.0, 1.0), pick[1] + rng.uniform(-1.0, 1.0))
+            jittered = (pick[0] + rng.uniform(-1.0, 1.0), pick[1] + rng.uniform(-1.0, 1.0))
+            if self.nav and not self.nav.clear(pick, jittered):
+                return pick                    # the nudge would have put it inside a wall
+            return jittered
 
         best: Optional[Point] = None
         best_clear = -1.0
@@ -145,4 +184,9 @@ def load_map(map_id: str) -> MapData:
 
 
 def available_maps() -> list[str]:
-    return sorted(p.stem for p in MAPS_DIR.glob("*.json"))
+    return sorted(set(p.stem for p in MAPS_DIR.glob("*.json")) | set(_cache))
+
+
+def map_choices() -> list[dict[str, str]]:
+    """Id and display name of every map, for the lobby's picker."""
+    return [{"id": mid, "name": load_map(mid).name} for mid in available_maps()]

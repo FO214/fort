@@ -11,7 +11,10 @@ import math
 from dataclasses import dataclass
 from typing import Optional, Protocol, Sequence
 
+from .nav import Nav
+
 IDLE, CHASE, ATTACK = 0, 1, 2          # zombie state codes on the wire
+REPLAN_S = 0.3                         # how often a zombie reconsiders its route round walls
 
 
 @dataclass(frozen=True)
@@ -49,6 +52,8 @@ class Zombie:
     state: int = IDLE
     target: Optional[str] = None
     next_attack: float = 0.0
+    waypoint: Optional[tuple[float, float]] = None      # next corner on the way round a wall
+    replan_at: float = 0.0
 
     def wire(self) -> list:
         """`[id, type, x, y, hp, state, target]`, as compact as JSON gets."""
@@ -63,7 +68,8 @@ class Bite:
 
 
 class World:
-    def __init__(self) -> None:
+    def __init__(self, nav: Optional[Nav] = None) -> None:
+        self.nav = nav                     # None on an open map: zombies walk straight
         self.zombies: dict[int, Zombie] = {}
         self._next_id = 1
         self.killed = 0
@@ -116,10 +122,22 @@ class World:
             reach = z.type.reach_m * (1.15 if z.state == ATTACK and not switched else 1.0)
             if dist > reach:
                 z.state = CHASE
-                # Stop just inside reach rather than standing on the player.
-                move = min(z.type.speed * speed_scale * dt, dist - z.type.reach_m * 0.8)
-                z.x += dx / dist * move
-                z.y += dy / dist * move
+                step = z.type.speed * speed_scale * dt
+                aim = self._aim(z, (tgt.x, tgt.y), now, switched)
+                if aim is None:
+                    # Nothing in the way: stop just inside reach rather than standing on the player.
+                    move = min(step, dist - z.type.reach_m * 0.8)
+                    z.x += dx / dist * move
+                    z.y += dy / dist * move
+                else:
+                    ax, ay = aim[0] - z.x, aim[1] - z.y
+                    far = math.hypot(ax, ay)
+                    if far <= step:
+                        z.x, z.y = aim
+                        z.replan_at = 0.0          # reached the corner: pick the next one now
+                    else:
+                        z.x += ax / far * step
+                        z.y += ay / far * step
             else:
                 if z.state != ATTACK or switched:
                     z.state = ATTACK
@@ -130,6 +148,19 @@ class World:
 
         self._separate()
         return bites
+
+    def _aim(self, z: Zombie, target: tuple[float, float], now: float,
+             switched: bool) -> Optional[tuple[float, float]]:
+        """The corner this zombie should walk to, or None to go straight at
+        its target. Routes are reconsidered a few times a second, not every
+        tick, which keeps a big wave cheap."""
+        if self.nav is None:
+            return None
+        if switched or now >= z.replan_at:
+            wp = self.nav.waypoint((z.x, z.y), target)
+            z.waypoint = None if wp == target else wp
+            z.replan_at = now + REPLAN_S + (z.id % 5) * 0.02      # spread the work out
+        return z.waypoint
 
     def _separate(self) -> None:
         """Push overlapping zombies apart so a wave reads as a crowd, not one
@@ -147,10 +178,14 @@ class World:
                     dx, dy, d = 1.0, 0.0, 1.0
                 push = (need - d) / 2
                 ux, uy = dx / d, dy / d
-                a.x -= ux * push
-                a.y -= uy * push
-                b.x += ux * push
-                b.y += uy * push
+                self._nudge(a, -ux * push, -uy * push)
+                self._nudge(b, ux * push, uy * push)
+
+    def _nudge(self, z: Zombie, dx: float, dy: float) -> None:
+        """Move a zombie aside, unless that would shove it through a wall."""
+        to = (z.x + dx, z.y + dy)
+        if self.nav is None or self.nav.clear((z.x, z.y), to):
+            z.x, z.y = to
 
     def snapshot(self) -> list[list]:
         return [z.wire() for z in self.zombies.values()]

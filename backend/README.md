@@ -11,7 +11,7 @@ Needs Python 3.10 or newer.
 ```sh
 python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
-.venv/bin/python -m pytest      # 72 tests, about 45 s (most of it is the live socket tests)
+.venv/bin/python -m pytest      # about 45 s (most of it is the live socket tests)
 ```
 
 Phones on the same Wi-Fi reach it at `ws://<your-laptop-ip>:8000/ws`.
@@ -24,9 +24,11 @@ app/room.py      lobby, players, ammo/reload, shot validation, bites
 app/world.py     zombies: spawn, chase, attack, un-stack
 app/mission.py   wave pacing and every tuning number (class Tuning)
 app/mapdata.py   map files, spawn placement, lat/lon <-> map metres
+app/nav.py       walls: line of sight and corridor routes for zombies
 app/models.py    wire protocol and gun classes
 app/geo.py       geometry helpers
-maps/arena.json  built-in open test map
+maps/arena.json       built-in open test map
+maps/schmeichel.json  the building (real outline, placeholder interior)
 ```
 
 ## How it works
@@ -34,6 +36,13 @@ maps/arena.json  built-in open test map
 - **Map.** A flat plane in metres, x right and y up. `rotation_deg` is the
   compass bearing of +y, so with 0 the map is x east / y north. The arena has
   no fixed real-world origin: the host's GPS fix at `start` becomes (0, 0).
+- **Buildings.** A map can carry an outline, walls, a corridor graph and
+  fixed spawn points (the file format is described at the top of
+  `app/mapdata.py`). Zombies then walk straight when nothing is in the way and
+  otherwise follow the corridor graph round the walls; they spawn at the
+  map's spawn points, preferring the ones nearest by corridor. A corridor
+  edge drawn through a wall is refused when the map loads. The host picks
+  the map in the lobby with `set_map`.
 - **Tick.** The world steps every 50 ms. Every second tick each phone gets a
   `snap`: mission phase, wave, zombies as `[id, type, x, y, hp, state, target]`
   and one small object per player.
@@ -71,7 +80,7 @@ classes and the map), then `lobby` on every roster change.
 
 | phone → server | server → phone |
 |---|---|
-| `ready` `set_class` `start {lat?, lon?}` | `welcome` `lobby` `started` |
+| `ready` `set_class` `set_map` (host) `start {lat?, lon?}` | `welcome` (classes, map, maps) `lobby` (map) `started` |
 | `pos {x, y, acc, heading, pitch}` ~8 Hz | `snap` 10 Hz |
 | `fire {seq, hits, heading}` `reload` | `fired` `zhit` `zkill` `reload` `reloaded` |
 | `revive {target, on}` | `hurt {dir}` `knocked` `revived` `dead` |

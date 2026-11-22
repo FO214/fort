@@ -303,6 +303,72 @@ test('nobody helps: a knocked player bleeds out and dies; the last one falling i
   for (const p of [ada, bo]) await p.ctx.close();
 });
 
+test('a real building: host picks the map, zombies keep to the floor plan, the map opens full screen', async ({ browser }) => {
+  const ada = await phone(browser, 'Ada');
+  const code = await createSquad(ada);
+  const bo = await phone(browser, 'Bo');
+  await joinSquad(bo, code);
+  await expect(ada.page.getByTestId('player-Bo')).toBeVisible();
+
+  // Only the host can choose. Everyone sees the choice.
+  await expect(bo.page.getByTestId('map-name')).toHaveText('Open arena');
+  await expect(bo.page.getByTestId('map-schmeichel')).toHaveCount(0);
+  await ada.page.getByTestId('map-schmeichel').click();
+  await expect(bo.page.getByTestId('map-name')).toContainText('Schmeichel');
+  await shot(ada.page, '21-lobby-map-picker');
+
+  await ada.page.getByTestId('start').click();
+  for (const p of [ada, bo]) await intoMission(p);
+  // Until GPS puts them at the building (the simulator starts 100 km away) the HUD says so.
+  await expect(ada.page.getByTestId('hint')).toContainText('not at Schmeichel');
+
+  const map = await ada.page.evaluate(() => window.__loonieStore!.getState().map as { start: [number, number]; helicopter: { x: number; y: number }; outline: [number, number][]; origin: [number, number] });
+  expect(map.origin[0]).toBeCloseTo(43.0073, 3);                 // pinned to the real building, not to the host
+  await place(ada.page, map.start[0], map.start[1], 90);
+  await place(bo.page, map.start[0] + 2, map.start[1] - 2, 90);
+  await expect(ada.page.getByTestId('hint')).toHaveCount(0);
+
+  // The radar is replaced by the floor plan, and the objective measures to the real helicopter spot.
+  await expect(ada.page.getByTestId('minimap')).toBeVisible();
+  await expect(ada.page.getByTestId('radar')).toHaveCount(0);
+  const far = Math.round(Math.hypot(map.helicopter.x - map.start[0], map.helicopter.y - map.start[1]));
+  await expect(ada.page.getByTestId('heli-dist')).toHaveText(`${far} m`);
+
+  // Zombies come from the building's spawn points and never leave the floor plan.
+  await expect.poll(async () => (await world(ada.page)).zombies.length, { timeout: 15_000 }).toBeGreaterThan(0);
+  const inside = ([x, y]: [number, number]) => {
+    let odd = false;
+    for (let i = 0, j = map.outline.length - 1; i < map.outline.length; j = i++) {
+      const [xi, yi] = map.outline[i], [xj, yj] = map.outline[j];
+      if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) odd = !odd;
+    }
+    return odd;
+  };
+  const first = (await world(ada.page)).zombies[0];
+  let closest = first.dist;
+  for (let i = 0; i < 12; i++) {
+    const w = await world(ada.page);
+    for (const z of w.zombies) expect(inside([z.x, z.y]), `zombie ${z.id} at ${z.x},${z.y}`).toBe(true);
+    closest = Math.min(closest, w.zombies[0]?.dist ?? closest);
+    await ada.page.waitForTimeout(400);
+  }
+  expect(closest).toBeLessThan(first.dist);                      // and they are closing in
+  await shot(ada.page, '22-building-hud-minimap');
+
+  // Tap the minimap for the whole floor; tap again to close.
+  await ada.page.getByTestId('minimap-open').click();
+  await expect(ada.page.getByTestId('fullmap')).toBeVisible();
+  await shot(ada.page, '23-building-full-map');
+  await ada.page.getByTestId('fullmap-close').click();
+  await expect(ada.page.getByTestId('fullmap')).toHaveCount(0);
+
+  await ada.page.getByTestId('abort').click();
+  await ada.page.getByTestId('abort-confirm').click();
+  for (const p of [ada, bo]) await expect(p.page.getByTestId('roster')).toBeVisible();
+  await expect(bo.page.getByTestId('map-name')).toContainText('Schmeichel');     // the choice survives a run
+  for (const p of [ada, bo]) await p.ctx.close();
+});
+
 test('a phone that reloads the page mid-mission drops back into it', async ({ browser }) => {
   const ada = await phone(browser, 'Ada');
   await createSquad(ada);

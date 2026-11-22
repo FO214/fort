@@ -16,6 +16,8 @@ import { StepDetector } from './steps';
 const SEND_EVERY_MS = 125;        // 8 Hz to the server
 const FRESH_FIX_S = 15;           // a lobby fix this recent seeds the mission position
 const SHOT_MUTE_S = 0.25;         // recoil is not a footstep
+/** Further than this from the map and GPS is not describing a player in this building. */
+export const OFF_MAP_M = 2000;
 const QR_FRESH_S = 1.2;           // a code counts as "in view" this long after the camera last read it
 
 /** Seconds on a clock that never jumps. */
@@ -148,6 +150,8 @@ export function useTracking(sending: boolean): void {
     if (!sending) return;
     const id = setInterval(() => {
       const p = tracking.pose();
+      // Miles from the building (wrong map picked, or playing from home): nothing useful to report.
+      if (Math.abs(p.x) > OFF_MAP_M || Math.abs(p.y) > OFF_MAP_M) return;
       net.pos(p.x, p.y, p.acc, p.heading ?? 0, p.pitch);
     }, SEND_EVERY_MS);
     return () => clearInterval(id);

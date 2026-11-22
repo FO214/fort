@@ -45,7 +45,8 @@
     "export:web": "expo export --platform web --output-dir dist",
     "e2e": "npm run export:web && playwright test -c e2e/playwright.config.ts",
     "e2e:only": "playwright test -c e2e/playwright.config.ts",
-    "test:logic": "LOGIC_ONLY=1 playwright test -c e2e/playwright.config.ts logic"
+    "test:logic": "LOGIC_ONLY=1 playwright test -c e2e/playwright.config.ts logic",
+    "heli-qr": "node scripts/make-heli-qr.mjs"
   },
   "private": true
 }

@@ -107,7 +107,7 @@ class Room:
             self.map: MapData = load_map(settings.map)
         except KeyError:
             raise GameError("Unknown map") from None
-        self.world = World()
+        self.world = World(self.map.nav)
         self.mission: Optional[Mission] = None
         self.started_at = 0.0
         self.last_tick = 0.0
@@ -145,6 +145,19 @@ class Room:
             raise GameError("Loadout locks when the mission starts")
         self._p(pid).cls = cls
 
+    def set_map(self, pid: str, map_id: str) -> None:
+        """Host picks where the mission is played."""
+        if pid != self.host_id:
+            raise GameError("Only the host can change the map")
+        if self.phase != "lobby":
+            raise GameError("The map locks when the mission starts")
+        try:
+            self.map = load_map(map_id)
+        except KeyError:
+            raise GameError("Unknown map") from None
+        self.settings = self.settings.model_copy(update={"map": map_id})
+        self.world = World(self.map.nav)
+
     def start(self, pid: str, now: float, lat: Optional[float] = None,
               lon: Optional[float] = None) -> Event:
         if pid != self.host_id:
@@ -155,7 +168,7 @@ class Room:
         if lat is not None and lon is not None:
             game_map = game_map.with_origin(lat, lon)
         self.map = game_map
-        self.world = World()
+        self.world = World(game_map.nav)
         self.mission = Mission(self.world, game_map, self.tuning, len(self.players), now, self.rng)
         self.phase = "playing"
         self.started_at = self.last_tick = now
@@ -182,7 +195,8 @@ class Room:
         self.phase = "lobby"
         self.mission = None
         self.ended = None
-        self.world = World()
+        self.map = load_map(self.settings.map)       # a mission may have anchored it; start clean
+        self.world = World(self.map.nav)
         for p in self.players.values():
             p.ready = False
 
@@ -363,6 +377,7 @@ class Room:
             "t": "lobby", "code": self.code, "host_id": self.host_id,
             "phase": self.phase, "settings": self.settings.model_dump(),
             "players": [p.lobby() for p in self.players.values()],
+            "map": self.map.public(),
         }
 
     # -------------------------------------------------------------- internals

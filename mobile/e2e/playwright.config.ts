@@ -18,8 +18,9 @@ const CAMERA = ensureFakeCamera(path.join(__dirname, 'output'));
 
 // Their own ports, so a dev server on 8000/8081 is left alone and the tests
 // always get a backend running the fast test pacing below.
-export const BACKEND = 8010;
-export const WEB = 8082;
+// E2E_BACKEND_PORT / E2E_WEB_PORT move them, for two checkouts testing at once.
+export const BACKEND = Number(process.env.E2E_BACKEND_PORT ?? 8010);
+export const WEB = Number(process.env.E2E_WEB_PORT ?? 8082);
 
 // A whole mission in about a minute. Same rules, shorter waits and smaller
 // waves (a full squad's first wave is 5 zombies here, 8 in the real game).
@@ -56,8 +57,8 @@ export default defineConfig({
   // `npm run test:logic` runs only the browserless specs and needs no servers.
   webServer: process.env.LOGIC_ONLY ? undefined : [
     {
-      // Use the backend's virtualenv when there is one.
-      command: `cd ../../backend && PY=$([ -x .venv/bin/python ] && echo .venv/bin/python || echo python3) && exec $PY -m uvicorn app.main:app --host 127.0.0.1 --port ${BACKEND} --log-level warning`,
+      // Use E2E_PYTHON if given, else the backend's virtualenv when there is one.
+      command: `cd ../../backend && PY=\${E2E_PYTHON:-$([ -x .venv/bin/python ] && echo .venv/bin/python || echo python3)} && exec $PY -m uvicorn app.main:app --host 127.0.0.1 --port ${BACKEND} --log-level warning`,
       url: `http://127.0.0.1:${BACKEND}/health`,
       env: { LOONIE_TUNING: TUNING },
       reuseExistingServer: false,

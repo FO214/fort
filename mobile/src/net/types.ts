@@ -21,8 +21,14 @@ export interface MapInfo {
   rotation_deg: number;
   start: [number, number];
   helicopter: { x: number; y: number; radius_m: number; qr: string };
-  walls: unknown[];
+  /** Building footprint, for drawing. Empty on the open arena. */
+  outline: [number, number][];
+  /** Wall segments `[x1, y1, x2, y2]`. */
+  walls: [number, number, number, number][];
+  labels: { text: string; x: number; y: number }[];
 }
+
+export interface MapChoice { id: string; name: string }
 
 /** `[id, type, x, y, hp, state, target]` */
 export type ZombieRow = [number, number, number, number, number, number, string | null];
@@ -60,8 +66,8 @@ export interface EndedMsg {
 }
 
 export type ServerMsg =
-  | { t: 'welcome'; player_id: string; token: string; code: string; host_id: string; classes: Record<string, GunClass>; map: MapInfo }
-  | { t: 'lobby'; code: string; host_id: string; phase: RoomPhase; settings: Settings; players: LobbyPlayer[] }
+  | { t: 'welcome'; player_id: string; token: string; code: string; host_id: string; classes: Record<string, GunClass>; map: MapInfo; maps: MapChoice[] }
+  | { t: 'lobby'; code: string; host_id: string; phase: RoomPhase; settings: Settings; players: LobbyPlayer[]; map: MapInfo }
   | { t: 'started'; now: number; map: MapInfo; mission: MissionState }
   | { t: 'snap'; now: number; ph: MissionPhase; wave: [number, number, number]; hold: [number, number];
       /** Extraction `[progress 0–1, holders needed, ids holding]`. */

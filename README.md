@@ -21,8 +21,20 @@ docs/      the build spec
 | 2 | Phone AR + shooting | done |
 | 3 | Full mission: knock, revive, helicopter, holdout, extraction | done |
 | 4 | Guns: ESP32 firmware, `/device`, pairing | not in this pass; phones use on-screen Fire and Reload |
-| 5 | Building map from a floor plan | not started |
+| 5 | Building map | machinery done; the Schmeichel map has the real outline but its interior is a placeholder until the walkthrough video can be read |
 | 6–7 | Zombie variety, sound, real art | not started |
+
+## The building map
+
+`backend/maps/schmeichel.json` is the Ronald D. Schmeichel Building at Western
+University. Its outline, position and orientation come from OpenStreetMap
+(way 1300081894), so a phone's GPS lands in the right place on it. What is
+inside the outline is **not real yet**: no interior walls, a corridor graph
+that just runs down the middle of the two wings, and a start and helicopter
+placed at opposite ends as guesses. The host picks the map in the lobby.
+
+The helicopter sign to print is `docs/helicopter-qr.svg` (regenerate with
+`npm run heli-qr` in `mobile/`).
 
 ## Run everything
 

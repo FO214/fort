@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Platform, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { Platform, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { distXY } from '../game/geo';
-import { tracking, useTracking } from '../game/tracking';
+import { OFF_MAP_M, tracking, useTracking } from '../game/tracking';
 import { useLandscape } from '../game/useLandscape';
 import { useStayAwake } from '../game/useStayAwake';
 import { net } from '../net/client';
@@ -21,6 +21,7 @@ import { GlassButton } from '../ui/GlassButton';
 import { HealthBar } from '../ui/HealthBar';
 import { HitMarker } from '../ui/HitMarker';
 import { KillFeed } from '../ui/KillFeed';
+import { MapView, hasFloorPlan } from '../ui/MapView';
 import { ObjectiveBar } from '../ui/ObjectiveBar';
 import { Pill } from '../ui/Pill';
 import { Radar } from '../ui/Radar';
@@ -143,12 +144,15 @@ export function Game() {
   }, [s.error]);
 
   const [confirmAbort, setConfirmAbort] = useState(false);
+  const [showMap, setShowMap] = useState(false);
+  const plan = s.map && hasFloorPlan(s.map) ? s.map : null;     // null on the open arena
   const pose = tracking.pose();
   const hint = s.connection !== 'open' ? 'Reconnecting…'
     : s.error ? s.error
     : s.sensorError ? s.sensorError
     : pose.heading == null ? 'Waiting for compass'
     : !pose.hasFix ? 'Waiting for GPS'
+    : Math.abs(pose.x) > OFF_MAP_M || Math.abs(pose.y) > OFF_MAP_M ? `GPS says you are not at ${s.map?.name ?? 'the map'}`
     : null;
   const nameOf = (id: string) => s.roster.find((p) => p.id === id)?.name ?? '···';
 
@@ -210,9 +214,18 @@ export function Game() {
             )}
           </View>
           <View style={{ flex: 1, alignItems: 'flex-end', gap: space.sm }}>
-            <Glass radius={radius.lg} padding={4}>
-              <Radar me={pose} myId={myId} squad={s.squad} zombies={zombies.latest()} heli={s.map?.helicopter} size={104} />
-            </Glass>
+            {plan ? (
+              // A building: the real floor plan around you. Tap for the whole floor.
+              <Pressable onPress={() => setShowMap(true)} testID="minimap-open" accessibilityRole="button" accessibilityLabel="Open the map">
+                <Glass radius={radius.lg} padding={4}>
+                  <MapView map={plan} me={pose} myId={myId} squad={s.squad} zombies={zombies.latest()} width={116} height={104} mode="mini" />
+                </Glass>
+              </Pressable>
+            ) : (
+              <Glass radius={radius.lg} padding={4}>
+                <Radar me={pose} myId={myId} squad={s.squad} zombies={zombies.latest()} heli={s.map?.helicopter} size={104} />
+              </Glass>
+            )}
             <Glass radius={radius.md} contentStyle={{ paddingHorizontal: space.md, paddingVertical: space.sm, gap: 4, minWidth: 132 }} testID="stats">
               <Row label="Wave" value={s.mission.wave ? String(s.mission.wave) : '–'} testID="wave" />
               <Row label="Zombies" value={String(s.mission.left)} tint={s.mission.left > 0 ? color.danger : undefined} testID="zombies-left" />
@@ -244,6 +257,18 @@ export function Game() {
       </Screen>
 
       <DamageFlash latest={lastDamage} anchorY={height / 2} />
+
+      {showMap && plan && (
+        <Pressable style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(6,8,13,0.88)' }]} onPress={() => setShowMap(false)}
+          testID="fullmap-close" accessibilityRole="button" accessibilityLabel="Close the map">
+          <MapView map={plan} me={pose} myId={myId} squad={s.squad} zombies={zombies.latest()} nameOf={nameOf}
+            width={width} height={height} mode="full" />
+          <View style={{ position: 'absolute', left: space.lg, top: space.md, gap: 2 }} pointerEvents="none">
+            <T v="label" c={color.ink3}>{plan.name}</T>
+            <T v="caption" c={color.ink2}>Tap anywhere to close</T>
+          </View>
+        </Pressable>
+      )}
 
       {!alive && (
         <DownedOverlay state={me.st === 'dead' ? 'dead' : 'knocked'} bleed={me.bl}
