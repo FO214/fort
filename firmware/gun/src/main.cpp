@@ -4,10 +4,11 @@
 // Nothing about the network is built in:
 // - Wi-Fi is set from a phone. With no saved network, or with reload held at
 //   power-on, the gun opens its own network "LOONIE-gun-xxxxxx" with a setup page.
-// - The server is found by UDP broadcast (backend/app/discovery.py) unless a
+// - The server is found over UDP (backend/app/discovery.py) unless a
 //   server was typed into the setup page.
 #include <Arduino.h>
 #include <WiFi.h>
+#include <esp_mac.h>
 #include <WiFiUdp.h>
 #include <WiFiManager.h>
 #include <Preferences.h>
@@ -34,6 +35,55 @@ static const uint16_t DISCOVERY_PORT = 8001;
 static const uint32_t PROBE_EVERY_MS = 2000;
 static const uint32_t REDISCOVER_AFTER_MS = 15000;   // server unreachable this long: look again
 static const uint32_t PORTAL_TIMEOUT_S = 300;
+
+// Wi-Fi modem sleep: the radio naps between the hotspot's beacons. Sends (the
+// buttons) still go out at once; only messages *to* the gun wait for a beacon.
+#ifndef GUN_POWER_SAVE
+#define GUN_POWER_SAVE 1
+#endif
+
+// Transmit power follows the signal: just enough to reach the hotspot. RSSI is
+// what we hear from it; the link is roughly symmetric, so if we hear it at R dBm
+// and it transmits at ~17 dBm, the path loses ~17-R dB and we need about
+// (17-R) - 70 dBm (+ margin) to land at a solid -70 dBm on its side.
+static const wifi_power_t TX_LEVELS[] = {WIFI_POWER_2dBm, WIFI_POWER_5dBm, WIFI_POWER_8_5dBm,
+                                         WIFI_POWER_11dBm, WIFI_POWER_13dBm, WIFI_POWER_15dBm,
+                                         WIFI_POWER_17dBm, WIFI_POWER_19_5dBm};
+static const float TX_DBM[] = {2, 5, 8.5, 11, 13, 15, 17, 19.5};
+static const int TX_MAX = sizeof TX_DBM / sizeof TX_DBM[0] - 1;
+static int txIdx = TX_MAX;                 // join at full power, then settle
+static uint32_t txHoldUntil = 0;           // after a drop, don't lower for a while
+static float rssiAvg = 0;
+
+static void setTx(int idx) {
+  idx = constrain(idx, 0, TX_MAX);
+  if (idx != txIdx) Serial.printf("tx: %.1f -> %.1f dBm (rssi %.0f)\n", TX_DBM[txIdx], TX_DBM[idx], rssiAvg);
+  txIdx = idx;
+  WiFi.setTxPower(TX_LEVELS[idx]);
+}
+
+static void adaptTx(uint32_t now) {
+  static uint32_t last = 0;
+  if (now - last < 2000) return;
+  last = now;
+  int r = WiFi.RSSI();
+  if (r == 0) return;                                     // no reading yet
+  // With power save on, RSSI swings ~10 dB between beacons: smooth hard, and
+  // only lower with real headroom and not more often than every 10 s.
+  rssiAvg = rssiAvg == 0 ? r : rssiAvg * 0.85f + r * 0.15f;
+  float need = (17 - rssiAvg) - 70 + 3;
+  static uint32_t lastLower = 0;
+  int want = 0;
+  while (want < TX_MAX && TX_DBM[want] < need) want++;
+  if (want > txIdx) setTx(want);                          // raise at once
+  else if (want < txIdx && now > txHoldUntil && now - lastLower > 10000 && TX_DBM[txIdx] - need > 6) {
+    setTx(txIdx - 1);                                     // lower one step at a time
+    lastLower = now;
+  }
+}
+
+// Round trip to the server, for checking what power saving costs.
+static uint32_t pingSentAt = 0, rttMs = 0;
 
 struct Button {
   uint8_t pin;
@@ -72,8 +122,15 @@ static void onEvent(WStype_t type, uint8_t* payload, size_t len) {
       for (auto& b : buttons) if (b.down) sendBtn(b);     // held through a reconnect
       break;
     }
+    case WStype_PONG:
+      if (len == 3 && memcmp(payload, "rtt", 3) == 0 && pingSentAt) { rttMs = millis() - pingSentAt; pingSentAt = 0; }
+      break;
     case WStype_DISCONNECTED:
-      if (online) offlineSince = millis();
+      if (online) {
+        offlineSince = millis();
+        setTx(txIdx + 2);                                 // maybe we were too quiet; hold it up for a while
+        txHoldUntil = millis() + 30000;
+      }
       online = false;
       Serial.println("server: disconnected");
       break;
@@ -100,15 +157,37 @@ static void useFixedServer() {
   connectTo(host, port);
 }
 
-// Broadcast "LOONIE?" and take the first "LOONIE <port>" reply.
+static void probe(IPAddress to) {
+  udp.beginPacket(to, DISCOVERY_PORT);
+  udp.print("LOONIE?");
+  udp.endPacket();
+}
+
+// Send "LOONIE?" and take the first "LOONIE <port>" reply. Broadcast first;
+// iPhone hotspots don't pass broadcast between clients, so also walk the
+// subnet one address at a time (a hotspot /28 is 14 hosts, a home /24 is 254).
 static void discover(uint32_t now) {
-  static uint32_t lastProbe = 0;
-  if (now - lastProbe >= PROBE_EVERY_MS) {
-    lastProbe = now;
-    for (IPAddress to : {WiFi.broadcastIP(), IPAddress(255, 255, 255, 255)}) {
-      udp.beginPacket(to, DISCOVERY_PORT);
-      udp.print("LOONIE?");
-      udp.endPacket();
+  // One round every PROBE_EVERY_MS: two broadcasts, then one pass over the
+  // subnet. Between rounds the radio can rest.
+  static uint32_t lastRound = 0, lastUnicast = 0, sweepHost = 0;
+  static bool sweeping = false;
+  if (!sweeping && now - lastRound >= PROBE_EVERY_MS) {
+    lastRound = now;
+    probe(WiFi.broadcastIP());
+    probe(IPAddress(255, 255, 255, 255));
+    sweeping = true;
+    sweepHost = 0;
+  }
+  uint32_t mask = (uint32_t)WiFi.subnetMask(), self = (uint32_t)WiFi.localIP();  // network byte order
+  uint32_t hosts = ~ntohl(mask);                          // e.g. 15 for /28
+  if (sweeping && now - lastUnicast >= 20) {               // paced so ARP keeps up
+    lastUnicast = now;
+    if (hosts < 2 || hosts > 1023 || ++sweepHost >= hosts) {   // too big to walk, or done
+      sweeping = false;
+      lastRound = now;
+    } else {
+      uint32_t ip = htonl((ntohl(self) & ntohl(mask)) | sweepHost);
+      if (ip != self) probe(IPAddress(ip));
     }
   }
   int n = udp.parsePacket();
@@ -157,7 +236,7 @@ void setup() {
 
   WiFi.mode(WIFI_STA);
   uint8_t mac[6];
-  WiFi.macAddress(mac);
+  esp_read_mac(mac, ESP_MAC_WIFI_STA);                    // from eFuse; WiFi.macAddress() is zeros until Wi-Fi starts
   char id[16];
   snprintf(id, sizeof id, "gun-%02x%02x%02x", mac[3], mac[4], mac[5]);
   gunId = id;
@@ -176,16 +255,16 @@ void setup() {
   bool reloadHeld = digitalRead(PIN_RELOAD) == LOW;
   if (!saved || reloadHeld) runSetupPortal();             // does not return
 
-  WiFi.setSleep(false);                                   // lower latency
-  Serial.printf("wifi: joining [%s]\n", wm.getWiFiSSID(true).c_str());
+  WiFi.setSleep(GUN_POWER_SAVE ? true : false);
+  Serial.printf("wifi: joining [%s], power save %s\n", wm.getWiFiSSID(true).c_str(), GUN_POWER_SAVE ? "on" : "off");
   WiFi.begin();                                           // the saved network
-  WiFi.setTxPower(WIFI_POWER_8_5dBm);                     // the hotspot phone is within arm's reach; full power only makes heat
-  udp.begin(0);
+  setTx(TX_MAX);
+  Serial.printf("udp: listening on %u: %s\n", DISCOVERY_PORT + 1, udp.begin(DISCOVERY_PORT + 1) ? "ok" : "FAILED");
 
   ws.onEvent(onEvent);
   ws.setReconnectInterval(2000);
   ws.enableHeartbeat(10000, 3000, 2);
-  Serial.printf("server: %s\n", fixedServer.length() ? fixedServer.c_str() : "auto (broadcast)");
+  Serial.printf("server: %s\n", fixedServer.length() ? fixedServer.c_str() : "auto (discovery)");
 }
 
 void loop() {
@@ -195,22 +274,29 @@ void loop() {
   wl_status_t st = WiFi.status();
   bool joined = st == WL_CONNECTED, wasJoined = lastStatus == WL_CONNECTED;
   if (joined != wasJoined || (!joined && now - lastWifiLog > 5000)) {
+    if (!joined && wasJoined) { setTx(TX_MAX); rssiAvg = 0; }       // lost the hotspot: rejoin loud
     lastStatus = st; lastWifiLog = now;
     if (st == WL_CONNECTED) Serial.printf("wifi: connected, ip %s\n", WiFi.localIP().toString().c_str());
     else Serial.printf("wifi: not connected (status %d)\n", (int)st);
   }
-  // Still not on Wi-Fi after a while: list what is in range, then try again.
-  static uint32_t lastScan = 0;
-  if (!joined && now - lastScan > 30000) {                // long enough for a join to finish
-    lastScan = now;
+  // Still not on Wi-Fi after a while: try again. A full scan is heavy on the
+  // radio, so only list what is in range on the first retry and every 5 min.
+  static uint32_t lastRetry = 0, lastList = 0;
+  static bool listed = false;
+  if (!joined && now - lastRetry > 30000) {               // long enough for a join to finish
+    lastRetry = now;
     WiFi.disconnect();
-    int n = WiFi.scanNetworks();
-    Serial.printf("wifi: %d networks in range\n", n);
-    for (int i = 0; i < n; i++) Serial.printf("  [%s] %d dBm ch %d\n", WiFi.SSID(i).c_str(), WiFi.RSSI(i), WiFi.channel(i));
+    if (!listed || now - lastList > 300000) {
+      listed = true; lastList = now;
+      int n = WiFi.scanNetworks();
+      Serial.printf("wifi: %d networks in range\n", n);
+      for (int i = 0; i < n; i++) Serial.printf("  [%s] %d dBm ch %d\n", WiFi.SSID(i).c_str(), WiFi.RSSI(i), WiFi.channel(i));
+    }
     WiFi.begin();
   }
 
   if (joined) {
+    adaptTx(now);
     if (!haveTarget) {
       if (fixedServer.length()) useFixedServer();
       else discover(now);
@@ -223,7 +309,12 @@ void loop() {
   if (haveTarget) ws.loop();                              // reconnects on its own once Wi-Fi is up
 
   static uint32_t lastTemp = 0;
-  if (now - lastTemp > 10000) { lastTemp = now; Serial.printf("temp: %.1f C  rssi %d dBm\n", temperatureRead(), (int)WiFi.RSSI()); }
+  if (now - lastTemp > 10000) {
+    lastTemp = now;
+    Serial.printf("temp: %.1f C  rssi %d dBm  tx %.1f dBm  rtt %u ms\n", temperatureRead(), (int)WiFi.RSSI(), TX_DBM[txIdx], rttMs);
+  }
+  static uint32_t lastPing = 0;
+  if (online && now - lastPing > 10000) { lastPing = now; pingSentAt = now; ws.sendPing((uint8_t*)"rtt", 3); }
   for (auto& b : buttons) {
     bool raw = digitalRead(b.pin) == LOW;                 // pressed pulls the pin to ground
     if (raw != b.lastRaw) { b.lastRaw = raw; b.changedAt = now; }
