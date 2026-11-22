@@ -171,7 +171,7 @@ export function LobbyScreen() {
   return (
     <View style={styles.root} testID="lobby">
       <SafeAreaView style={{ flex: 1 }}>
-        <View style={[styles.column, wide && { maxWidth: undefined }, { flex: 1 }]}>
+        <View style={[styles.column, wide && styles.columnWide, { flex: 1 }]}>
           <View style={styles.topBar}>
             <FormationMark size={30} />
             <Button label="Leave" variant="tertiary" size="sm" icon="leave" onPress={leave} testID="leave" />
@@ -212,6 +212,8 @@ export function LobbyScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.background },
   column: { width: '100%', maxWidth: CONTENT_MAX, alignSelf: 'center', paddingHorizontal: space[6] },
+  // Sideways (a phone already on its blaster): two columns need twice the room.
+  columnWide: { maxWidth: CONTENT_MAX * 2 + space[8] },
   topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', height: 44, marginRight: -space[3] },
   footer: { gap: space[2], paddingTop: space[3], paddingBottom: space[2], borderTopWidth: borders.thin, borderTopColor: colors.border },
 });

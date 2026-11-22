@@ -21,6 +21,7 @@ import { HudMenu } from '../overlays/HudMenu';
 import { KnockedOverlay } from '../overlays/KnockedOverlay';
 import { PermissionOverlay } from '../overlays/PermissionOverlay';
 import { RevivePrompt } from '../overlays/RevivePrompt';
+import { isSim } from '../sensors';
 import { selectClass, selectMe, serverNow, useStore, zombies } from '../store';
 import { alpha, borders, colors, hud, space, touch } from '../theme';
 import { AmmoReadout } from '../ui/AmmoReadout';
@@ -44,6 +45,7 @@ const REVIVE_RANGE_M = 4;
 const REVIVE_SLACK_CAP_M = 25;
 /** A position estimate looser than this is worth telling the player about. */
 const WEAK_GPS_M = 25;
+const SIMULATED = isSim();
 /** This close to the helicopter, the host is offered "We're here" on the HUD itself. */
 const ARRIVAL_PROMPT_M = 20;
 
@@ -248,7 +250,8 @@ export function MatchScreen() {
         // what reads the helicopter's QR code. No separate scanning mode.
         <CameraView style={StyleSheet.absoluteFill} facing="back"
           barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-          onBarcodeScanned={final ? (r) => tracking.noteQr(r.data) : undefined} />
+          // With simulated sensors the code comes from the simulator, so the camera's own scanner stays off.
+          onBarcodeScanned={final && !SIMULATED ? (r) => tracking.noteQr(r.data) : undefined} />
       ) : null}
 
       <ZombieLayer width={width} height={height} cls={cls} aimRef={aimRef} onAimChange={setOnTarget} inset={Math.max(insets.left, insets.right)} />

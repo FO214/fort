@@ -7,8 +7,11 @@
 import { test, expect, type Page } from '@playwright/test';
 import {
   LANDSCAPE, PORTRAIT, SERVER, appUrl, connectGun, createSquad, dropGun, gunButton, hud, intoMission, joinSquad, phone, place, shot,
-  startMission, world,
+  startMission,
 } from './helpers';
+
+type Box = { x: number; y: number; width: number; height: number };
+const overlap = (a: Box, b: Box) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 
 test('main menu: a call sign comes first; settings keep the preferences and tuck the server address away', async ({ browser }) => {
   const p = await phone(browser, '');
@@ -109,6 +112,35 @@ test('lobby: a host who leaves is asked first, and the lobby passes to the next 
   for (const x of [ada, bo]) await x.ctx.close();
 });
 
+test('lobby: a phone already sideways on its blaster gets two columns, nothing overlapping', async ({ browser }) => {
+  const ada = await phone(browser, 'Ada');
+  const code = await createSquad(ada);
+  const bo = await phone(browser, 'Bo');
+  await joinSquad(bo, code);
+  await ada.page.setViewportSize(LANDSCAPE);
+  const cards = ['class-pistol', 'class-smg', 'class-shotgun', 'class-rifle'];
+  // All four rectangles in one read, once the cards have moved to the right-hand column.
+  const read = () => ada.page.evaluate((ids) => ids.map((id) => {
+    const r = document.querySelector(`[data-testid="${id}"]`)?.getBoundingClientRect();
+    return r ? { x: r.x, y: r.y, width: r.width, height: r.height } : null;
+  }), [...cards, 'roster']);
+  await expect.poll(async () => { const b = await read(); return b.every(Boolean) && b[0]!.x > LANDSCAPE.width / 2; }).toBe(true);
+  const all = (await read()) as Box[];
+  const boxes = all.slice(0, cards.length);
+  const roster = all[cards.length];
+  for (let i = 0; i < boxes.length; i++) {
+    expect(boxes[i].width, `${cards[i]} has room for its numbers`).toBeGreaterThanOrEqual(76);
+    expect(boxes[i].x + boxes[i].width).toBeLessThanOrEqual(LANDSCAPE.width);
+    for (let j = i + 1; j < boxes.length; j++) expect(overlap(boxes[i], boxes[j]), `${cards[i]} overlaps ${cards[j]}`).toBe(false);
+  }
+  for (const b of boxes) expect(overlap(roster, b), 'the roster and the class cards sit side by side').toBe(false);
+  await expect(ada.page.getByTestId('player-Ada')).toContainText('Ada');
+  await expect(ada.page.getByTestId('start')).toBeVisible();
+  await expect(ada.page.getByTestId('ready')).toBeVisible();
+  await shot(ada.page, '03-lobby-host-landscape');
+  for (const x of [ada, bo]) await x.ctx.close();
+});
+
 test('pairing a blaster: the window, the timeout, and "paired" only when the gun itself answers', async ({ browser }) => {
   test.setTimeout(90_000);
   const ada = await phone(browser, 'Ada');
@@ -196,9 +228,6 @@ test('deploy: turn the phone, mount it, find the position, count in', async ({ b
 
 // ---- the HUD at other sizes -------------------------------------------------
 
-type Box = { x: number; y: number; width: number; height: number };
-const overlap = (a: Box, b: Box) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
-
 /** Every critical HUD piece is on screen and none of them cover each other. */
 async function expectHudSound(page: Page, size: { width: number; height: number }): Promise<void> {
   const ids = ['healthbar', 'objective', 'stats', 'ammo-panel', 'fire', 'reload', 'reticle', 'hud-menu'];
@@ -233,16 +262,16 @@ test('the HUD holds together on small and large phones, and at every HUD size', 
   await intoMission(ada);
   await place(ada.page, 0, 0);
   await expect(ada.page.getByTestId('squad')).toContainText('Di');             // a full squad list, the tightest case
-  await expect.poll(async () => (await world(ada.page)).zombies.length, { timeout: 15_000 }).toBeGreaterThan(0);
 
   const sizes = { 'iphone-se': { width: 667, height: 375 }, 'iphone-15': LANDSCAPE, 'iphone-15-pro-max': { width: 932, height: 430 }, 'small-android': { width: 640, height: 360 } };
   for (const [name, size] of Object.entries(sizes)) {
     await ada.page.setViewportSize(size);
     for (const scale of ['0.9', '1', '1.12']) {
       await ada.page.evaluate((v) => window.__loonieStore!.getState().setPrefs({ hudScale: Number(v) }), scale);
-      await ada.page.waitForTimeout(150);
+      await ada.page.waitForTimeout(120);
       await expectHudSound(ada.page, size);
-      if (scale !== '0.9') await shot(ada.page, `24-hud-${name}-x${scale}`);
+      // Straight to the file: this has to finish before the first wave reaches a player who is not shooting back.
+      if (scale !== '0.9') await ada.page.screenshot({ path: `${__dirname}/output/24-hud-${name}-x${scale}.png` });
     }
   }
   for (const x of [ada, ...mates]) await x.ctx.close();

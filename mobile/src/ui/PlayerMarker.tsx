@@ -1,5 +1,6 @@
 import React from 'react';
-import Svg, { Circle, Polygon, Rect, Text as SvgText } from 'react-native-svg';
+import { StyleSheet, Text, View } from 'react-native';
+import Svg, { Circle, Polygon, Rect } from 'react-native-svg';
 import type { Identity, MarkerShape } from '../game/identity';
 import { colors, fonts } from '../theme';
 
@@ -18,19 +19,27 @@ export function markerShape(shape: MarkerShape, fill: string, stroke?: string, s
  * A player's identity marker: their colour in their shape, with their slot
  * number inside once it is big enough to read. `dim` is for a player who is
  * not connected.
+ *
+ * The number is ordinary text laid over the drawing, not text inside the
+ * SVG, so it is set in the display face on every platform.
  */
 export function PlayerMarker({ identity, size = 28, numbered = size >= 22, dim }:
   { identity: Identity; size?: number; numbered?: boolean; dim?: boolean }) {
+  const triangle = identity.shape === 'triangle';
   return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" opacity={dim ? 0.4 : 1}
-      accessibilityLabel={`Player ${identity.slot + 1}`}>
-      {markerShape(identity.shape, identity.color)}
+    <View style={{ width: size, height: size, opacity: dim ? 0.4 : 1 }} accessibilityLabel={`Player ${identity.slot + 1}`}>
+      <Svg width={size} height={size} viewBox="0 0 24 24">{markerShape(identity.shape, identity.color)}</Svg>
       {numbered ? (
-        <SvgText x={12} y={identity.shape === 'triangle' ? 18.4 : 16.3} textAnchor="middle" fontFamily={fonts.displayBlack}
-          fontSize={identity.shape === 'triangle' ? 10.5 : 12.5} fill={colors.background}>
-          {identity.slot + 1}
-        </SvgText>
+        <View style={[StyleSheet.absoluteFill, styles.centre, triangle && { paddingTop: size * 0.2 }]} pointerEvents="none">
+          <Text allowFontScaling={false} style={{ fontFamily: fonts.displayBlack, fontSize: size * (triangle ? 0.44 : 0.52), lineHeight: size * 0.6, color: colors.background }}>
+            {identity.slot + 1}
+          </Text>
+        </View>
       ) : null}
-    </Svg>
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  centre: { alignItems: 'center', justifyContent: 'center' },
+});

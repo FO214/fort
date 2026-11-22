@@ -10,7 +10,11 @@ import { BACKEND } from './playwright.config';
 
 export const OUT = path.join(__dirname, 'output');
 fs.mkdirSync(OUT, { recursive: true });
-export const shot = (p: Page, name: string) => p.screenshot({ path: path.join(OUT, `${name}.png`) });
+/** A screenshot for the record, once anything that just opened has finished arriving. */
+export const shot = async (p: Page, name: string) => {
+  await p.waitForTimeout(280);
+  await p.screenshot({ path: path.join(OUT, `${name}.png`) });
+};
 
 export const SERVER = `ws://localhost:${BACKEND}/ws`;
 export const DEVICE = `ws://localhost:${BACKEND}/device`;

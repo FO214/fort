@@ -11,12 +11,13 @@
  * shape; zombies have a shape per type; the helicopter is the amber H.
  */
 import React from 'react';
-import { View } from 'react-native';
-import Svg, { Circle, ClipPath, Defs, G, Line, Path, Polygon, Rect, Text as SvgText } from 'react-native-svg';
+import { StyleSheet, View } from 'react-native';
+import Svg, { Circle, ClipPath, Defs, G, Line, Path, Polygon, Rect } from 'react-native-svg';
 import type { Identity } from '../game/identity';
 import type { MapInfo, PlayerSnap, ZombieRow } from '../net/types';
-import { alpha, colors, fonts } from '../theme';
+import { alpha, colors } from '../theme';
 import { markerShape } from './PlayerMarker';
+import { T } from './T';
 import { zombieKind, type ZombieKind } from './ZombieSprite';
 
 export interface MapPose { x: number; y: number; heading: number | null }
@@ -98,6 +99,13 @@ export function MeMark({ x, y, turn = 0, scale = 1 }: { x: number; y: number; tu
   );
 }
 
+const WORD_W = 140;
+const styles = StyleSheet.create({
+  word: { position: 'absolute', width: WORD_W },
+  // A name sits on a small plate so it holds over walls and markers.
+  name: { backgroundColor: colors.camera.backingStrong, paddingHorizontal: 5, overflow: 'hidden' },
+});
+
 export function MapView({ map, me, myId, squad, zombies, identityOf, nameOf, width, height, mode, rangeM = 22 }: Props) {
   const heading = me.heading ?? 0;
   const mini = mode === 'mini';
@@ -139,11 +147,6 @@ export function MapView({ map, me, myId, squad, zombies, identityOf, nameOf, wid
             const [x1, y1] = to(w[0], w[1]), [x2, y2] = to(w[2], w[3]);
             return <Line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke={alpha(colors.textPrimary, 0.82)} strokeWidth={mini ? 1.5 : 2} strokeLinecap="square" />;
           })}
-          {!mini && (map.labels ?? []).map((lb, i) => {
-            const [lx, ly] = to(lb.x, lb.y);
-            return <SvgText key={i} x={lx} y={ly} fill={colors.textSecondary} fontSize={12} fontFamily={fonts.interfaceMedium} textAnchor="middle">{lb.text}</SvgText>;
-          })}
-
           <HeliMark x={hx} y={hy} scale={mini ? 0.95 : 1.5} />
           {zombies.map((z) => {
             const [zx, zy] = to(z[2], z[3]);
@@ -152,25 +155,29 @@ export function MapView({ map, me, myId, squad, zombies, identityOf, nameOf, wid
           {squad.filter((p) => p.id !== myId).map((p) => {
             const [px, py] = to(p.x, p.y);
             const identity = identityOf(p.id);
-            return (
-              <G key={p.id}>
-                <MateMark x={px} y={py} identity={identity} state={p.st} scale={mini ? 0.9 : 1.2} />
-                {!mini && nameOf ? (
-                  // Drawn twice: a dark edge under the name so it holds over walls.
-                  <>
-                    <SvgText x={px} y={py - 12} fill="none" stroke={colors.background} strokeWidth={3.5} strokeLinejoin="round"
-                      fontSize={13} fontFamily={fonts.interfaceSemibold} textAnchor="middle">{nameOf(p.id)}</SvgText>
-                    <SvgText x={px} y={py - 12} fill={colors.textPrimary}
-                      fontSize={13} fontFamily={fonts.interfaceSemibold} textAnchor="middle">{nameOf(p.id)}</SvgText>
-                  </>
-                ) : null}
-              </G>
-            );
+            return <MateMark key={p.id} x={px} y={py} identity={identity} state={p.st} scale={mini ? 0.9 : 1.2} />;
           })}
           {/* Mini: the map turns, the arrow always points up. Full: the arrow turns. */}
           <MeMark x={mx} y={my} turn={mini ? 0 : heading} scale={mini ? 0.9 : 1.2} />
         </G>
       </Svg>
+      {/* Words are ordinary text laid over the drawing, so they are set in the interface face everywhere. */}
+      {mini ? null : (
+        <View style={StyleSheet.absoluteFill} pointerEvents="none">
+          {(map.labels ?? []).map((lb, i) => {
+            const [lx, ly] = to(lb.x, lb.y);
+            return <T key={i} v="label" c={colors.textSecondary} center numberOfLines={1} style={[styles.word, { left: lx - WORD_W / 2, top: ly - 9 }]}>{lb.text}</T>;
+          })}
+          {nameOf ? squad.filter((p) => p.id !== myId).map((p) => {
+            const [px, py] = to(p.x, p.y);
+            return (
+              <View key={p.id} style={[styles.word, { left: px - WORD_W / 2, top: py - 31, alignItems: 'center' }]}>
+                <T v="label" c={colors.textPrimary} numberOfLines={1} style={styles.name}>{nameOf(p.id)}</T>
+              </View>
+            );
+          }) : null}
+        </View>
+      )}
     </View>
   );
 }

@@ -1,11 +1,12 @@
 import React from 'react';
-import { Pressable, View } from 'react-native';
-import Svg, { Circle, G, Line, Text as SvgText } from 'react-native-svg';
+import { Pressable, StyleSheet, View } from 'react-native';
+import Svg, { Circle, Line } from 'react-native-svg';
 import { bearingXY, distXY } from '../game/geo';
 import type { Identity } from '../game/identity';
 import type { MapInfo, PlayerSnap, ZombieRow } from '../net/types';
-import { alpha, colors, fonts } from '../theme';
+import { alpha, colors } from '../theme';
 import { HudPanel } from './HudPanel';
+import { T } from './T';
 import { HeliMark, MapView, MateMark, MeMark, ZombieMark, hasFloorPlan, type MapPose } from './MapView';
 
 const RADAR_RANGE_M = 30;
@@ -49,6 +50,7 @@ function Radar({ me, myId, squad, zombies, heli, identityOf, size }: {
     return { x: c + Math.sin(rel) * r, y: c - Math.cos(rel) * r, far: dist > RADAR_RANGE_M };
   };
   const northA = (-heading * Math.PI) / 180;
+  const nx = c + Math.sin(northA) * (rMax - 1), ny = c - Math.cos(northA) * (rMax - 1);
   const h = heli ? place(heli.x, heli.y) : null;
   const line = alpha(colors.textPrimary, 0.22);
   return (
@@ -58,10 +60,7 @@ function Radar({ me, myId, squad, zombies, heli, identityOf, size }: {
         <Circle cx={c} cy={c} r={rMax / 2} fill="none" stroke={line} strokeWidth={1} />
         <Line x1={c} y1={c - rMax} x2={c} y2={c + rMax} stroke={line} strokeWidth={1} />
         <Line x1={c - rMax} y1={c} x2={c + rMax} y2={c} stroke={line} strokeWidth={1} />
-        <G transform={`translate(${c + Math.sin(northA) * (rMax - 1)} ${c - Math.cos(northA) * (rMax - 1)})`}>
-          <Circle r={6.5} fill={colors.background} />
-          <SvgText fill={colors.textPrimary} fontSize={10} fontFamily={fonts.technicalSemibold} textAnchor="middle" y={3.6}>N</SvgText>
-        </G>
+        <Circle cx={nx} cy={ny} r={7} fill={colors.background} />
         {h ? <HeliMark x={h.x} y={h.y} scale={0.9} opacity={h.far ? 0.75 : 1} /> : null}
         {zombies.map((z) => {
           const d = place(z[2], z[3]);
@@ -72,8 +71,15 @@ function Radar({ me, myId, squad, zombies, heli, identityOf, size }: {
           return <MateMark key={p.id} x={d.x} y={d.y} identity={identityOf(p.id)} state={p.st} scale={0.9} opacity={d.far ? 0.65 : 1} />;
         })}
         <MeMark x={c} y={c} scale={0.85} />
-        <SvgText x={size - 5} y={size - 5} fill={colors.textSecondary} fontSize={10} fontFamily={fonts.technical} textAnchor="end">{RADAR_RANGE_M} m</SvgText>
       </Svg>
+      {/* North and the range, as ordinary text over the drawing. */}
+      <T v="hudMicro" style={[styles.north, { left: nx - 7, top: ny - 7 }]}>N</T>
+      <T v="hudMicro" c={colors.textSecondary} style={styles.range}>{RADAR_RANGE_M} m</T>
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  north: { position: 'absolute', width: 14, height: 14, lineHeight: 14, fontSize: 10, letterSpacing: 0, textAlign: 'center' },
+  range: { position: 'absolute', right: 4, bottom: 2, fontSize: 10, letterSpacing: 0.4, textTransform: 'none' },
+});
