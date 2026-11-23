@@ -1,10 +1,13 @@
 /**
  * Short audio cues, played through expo-audio.
  *
- * One player per cue, made the first time it is needed. A cue that is asked
- * for again while it is still sounding restarts rather than stacking, and a
- * cue cannot fire faster than `MIN_GAP_MS`, so an SMG on full auto is a
- * rattle and not a wall of noise.
+ * Speed matters most for the shot: the sound is the trigger's answer. So the
+ * files are copied onto the phone and their players made before the mission
+ * needs them (`preloadSounds`), and a sound that repeats keeps a few copies:
+ * one that has finished is wound back and waits, and playing it is a single
+ * call with no seek in front. Only when every copy is still sounding (full
+ * auto) is one restarted, and a cue cannot fire faster than `MIN_GAP_MS`, so
+ * an SMG is a rattle and not a wall of noise.
  *
  * Loudness follows what matters: being hurt or knocked is louder than your
  * own shots. Sound is never the only sign of anything: every cue here has
@@ -18,6 +21,7 @@
  * The zombie is the one sound that is not a cue: it loops for as long as one
  * is in earshot, and `setHorde` moves its loudness and pitch (see horde.ts).
  */
+import { Asset } from 'expo-asset';
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
 import type { Cue } from './feedback';
 import type { Voice } from './horde';
@@ -53,19 +57,56 @@ const SHOT: Record<string, Sound> = {
   pistol: 'fire-pistol', smg: 'fire-smg', shotgun: 'fire-shotgun', rifle: 'fire-rifle',
 };
 
+/**
+ * How many copies of a sound are kept. Enough that a single-shot weapon
+ * fired as fast as it allows always finds one that has finished; the
+ * automatic gets two, because it restarts them anyway.
+ */
+const COPIES: Partial<Record<Sound, number>> = {
+  'fire-pistol': 3, 'fire-smg': 2, 'fire-shotgun': 4, 'fire-rifle': 4, hit: 3, kill: 2,
+};
+
 const MIN_GAP_MS = 55;
-const players = new Map<Sound, AudioPlayer>();
+interface Copy { player: AudioPlayer; ready: boolean; startedAt: number }
+const copiesOf = new Map<Sound, Copy[]>();
 const lastPlayed = new Map<Sound, number>();
 let modeSet = false;
 
-function player(sound: Sound): AudioPlayer {
-  let p = players.get(sound);
-  if (!p) {
-    p = createAudioPlayer(FILES[sound]);
-    p.volume = VOLUME[sound];
-    players.set(sound, p);
+function makeCopy(sound: Sound): Copy {
+  const player = createAudioPlayer(FILES[sound]);
+  player.volume = VOLUME[sound];
+  const copy: Copy = { player, ready: true, startedAt: 0 };      // a new player sits at its start
+  // Wind it back as soon as it finishes, while nobody is waiting on it.
+  player.addListener('playbackStatusUpdate', (status) => {
+    if (status.didJustFinish) player.seekTo(0).then(() => { copy.ready = true; }).catch(() => {});
+  });
+  return copy;
+}
+
+function copies(sound: Sound): Copy[] {
+  let list = copiesOf.get(sound);
+  if (!list) {
+    list = Array.from({ length: COPIES[sound] ?? 1 }, () => makeCopy(sound));
+    copiesOf.set(sound, list);
   }
-  return p;
+  return list;
+}
+
+/**
+ * Get the sounds onto the phone, and their players made, before the first
+ * shot needs them. Without this the first use of each sound makes its player
+ * on the spot and, in Expo Go, fetches the file from the laptop over Wi-Fi.
+ * Only this player's own weapon is readied; the rest are made if ever needed.
+ * Safe to call more than once.
+ */
+export function preloadSounds(weapon?: string): Promise<void> {
+  const shot = SHOT[weapon ?? ''] ?? 'fire-pistol';
+  const wanted = (Object.keys(FILES) as Sound[]).filter((s) => !s.startsWith('fire-') || s === shot);
+  return Asset.loadAsync([...wanted.map((s) => FILES[s] as number), HORDE_FILE as number])
+    .then(() => undefined, () => undefined)       // could not copy them: the players fall back to where the bundle came from
+    .then(() => {
+      try { audioMode(); for (const s of wanted) copies(s); } catch { /* no audio on this device */ }
+    });
 }
 
 function audioMode(): void {
@@ -82,9 +123,14 @@ export function playSound(cue: Cue, weapon?: string): void {
   lastPlayed.set(sound, now);
   try {
     audioMode();
-    const p = player(sound);
-    p.seekTo(0).catch(() => {});
-    p.play();
+    const list = copies(sound);
+    const waiting = list.find((c) => c.ready);
+    // None has finished: restart the one that has been sounding longest.
+    const c = waiting ?? list.reduce((a, b) => (a.startedAt <= b.startedAt ? a : b));
+    if (!waiting) c.player.seekTo(0).catch(() => {});
+    c.ready = false;
+    c.startedAt = now;
+    c.player.play();
   } catch { /* no audio on this device: the screen still says what happened */ }
 }
 

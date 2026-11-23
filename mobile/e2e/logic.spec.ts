@@ -7,6 +7,7 @@ import { fromLocal, toLocal, angleDiffDeg } from '../src/game/geo';
 import { OrientationTracker, pitchFromAttitude } from '../src/game/orientation';
 import { PositionTracker, STEP_M } from '../src/game/position';
 import { StepDetector } from '../src/game/steps';
+import { PENDING_SHOT_S, expire, settle, shownAmmo, willFire } from '../src/game/ammo';
 import { EARSHOT_M, FULL_AT_M, HordeEar, RATE_MAX, RATE_MIN, hordeVoice, nearestDistance } from '../src/game/horde';
 import { DEATH_FX_S, ZombieBuffer, pickTargets, project, underCrosshair, type Camera } from '../src/game/zombies';
 import { Z_ATTACK, Z_CHASE } from '../src/net/types';
@@ -691,5 +692,55 @@ test.describe('the horde, heard', () => {
     expect(ear.hear(null, 1.1)).toBeNull();
     expect(ear.hear(EARSHOT_M + 1, 1.2)).toBeNull();
     expect(ear.hear(12, 1.3)!.rate).toBe(1);
+  });
+});
+
+test.describe('the ammo readout runs ahead of the server', () => {
+  test('a pull comes off the readout at once, and the server\'s answer settles it', () => {
+    let pending = [{ seq: 7, at: 100 }];
+    expect(shownAmmo(10, pending)).toBe(9);                 // pulled, not yet answered
+    pending = settle(pending, 7);
+    expect(shownAmmo(9, pending)).toBe(9);                  // answered: same number, now the server's
+  });
+
+  test('three quick pulls, answered one at a time, never show a number going back up', () => {
+    let pending = [{ seq: 1, at: 0 }, { seq: 2, at: 0.1 }, { seq: 3, at: 0.2 }];
+    expect(shownAmmo(10, pending)).toBe(7);
+    pending = settle(pending, 1); expect(shownAmmo(9, pending)).toBe(7);
+    pending = settle(pending, 2); expect(shownAmmo(8, pending)).toBe(7);
+    pending = settle(pending, 3); expect(shownAmmo(7, pending)).toBe(7);
+  });
+
+  test('a snapshot taken before the server saw the pull does not put the round back', () => {
+    // The snapshot still says 10; the pull is still waiting; the readout holds at 9.
+    expect(shownAmmo(10, [{ seq: 4, at: 50 }])).toBe(9);
+  });
+
+  test('the server refusing a pull puts the round back', () => {
+    const pending = settle([{ seq: 5, at: 0 }], 5);         // answered "cooldown": its count is unchanged
+    expect(shownAmmo(10, pending)).toBe(10);
+  });
+
+  test('an answer settles everything sent before it, and nothing sent after', () => {
+    expect(settle([{ seq: 1, at: 0 }, { seq: 2, at: 0 }, { seq: 3, at: 0 }], 2)).toEqual([{ seq: 3, at: 0 }]);
+  });
+
+  test('a pull that never gets an answer stops counting', () => {
+    const pending = [{ seq: 9, at: 10 }];
+    expect(expire(pending, 10 + PENDING_SHOT_S - 0.1)).toBe(pending);     // still waiting: untouched, same array
+    expect(expire(pending, 10 + PENDING_SHOT_S)).toEqual([]);
+  });
+
+  test('the readout never goes below empty', () => {
+    expect(shownAmmo(1, [{ seq: 1, at: 0 }, { seq: 2, at: 0 }])).toBe(0);
+  });
+
+  test('only a pull the server will accept is predicted', () => {
+    const ok = { ammo: 5, reloading: false, sinceLastShotS: 1, fireIntervalS: 0.4 };
+    expect(willFire(ok)).toBe(true);
+    expect(willFire({ ...ok, ammo: 0 })).toBe(false);
+    expect(willFire({ ...ok, reloading: true })).toBe(false);
+    expect(willFire({ ...ok, sinceLastShotS: 0.2 })).toBe(false);          // faster than the weapon fires
+    expect(willFire({ ...ok, sinceLastShotS: 0.35 })).toBe(true);          // the server allows 15% early
   });
 });

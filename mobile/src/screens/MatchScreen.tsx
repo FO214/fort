@@ -4,9 +4,10 @@ import { CameraView } from 'expo-camera';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
+import { willFire } from '../game/ammo';
 import { feedback } from '../game/feedback';
 import { HordeEar, nearestDistance } from '../game/horde';
-import { setHorde } from '../game/sound';
+import { preloadSounds, setHorde } from '../game/sound';
 import { distXY } from '../game/geo';
 import { identityOf } from '../game/identity';
 import { permissionsReady, usePermissions } from '../game/permissions';
@@ -23,7 +24,7 @@ import { HudMenu } from '../overlays/HudMenu';
 import { KnockedOverlay } from '../overlays/KnockedOverlay';
 import { PermissionOverlay } from '../overlays/PermissionOverlay';
 import { RevivePrompt } from '../overlays/RevivePrompt';
-import { selectClass, selectMe, serverNow, useStore, zombies } from '../store';
+import { selectAmmo, selectClass, selectMe, serverNow, useStore, zombies } from '../store';
 import { alpha, borders, colors, hud, space, touch } from '../theme';
 import { AmmoReadout } from '../ui/AmmoReadout';
 import { Crosshair } from '../ui/Crosshair';
@@ -121,6 +122,8 @@ export function MatchScreen() {
   // ---- hold to extract: a button on the screen, nothing to scan ----
   const [extractDown, setExtractDown] = useState(false);
   const extracting = final && alive && extractDown;
+  const extractingRef = useRef(false);
+  extractingRef.current = extracting;
   useEffect(() => { net.extract(extracting); }, [extracting]);
   useEffect(() => { if (!final || !alive) setExtractDown(false); }, [final, alive]);
 
@@ -142,15 +145,25 @@ export function MatchScreen() {
   // ---- trigger ----
   const [kick, setKick] = useState(0);
   const auto = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastShotAt = useRef(0);
   const pull = useCallback(() => {
     const st = useStore.getState();
     if (selectMe(st)?.st !== 'alive' || !st.deployed) return;
     const aim = aimRef.current;
-    net.fire(aim.ids, aim.heading);
+    const seq = net.fire(aim.ids, aim.heading);
     tracking.noteShot();
-    const loaded = st.ammo > 0 && st.reloadingUntil <= serverNow();
+    const weapon = selectClass(st);
+    const t = serverNow();
+    const loaded = selectAmmo(st) > 0 && st.reloadingUntil <= t;
+    // The readout drops now, not when the server answers, for a pull the
+    // server will accept. Its answer then settles the count either way.
+    if (weapon && !extractingRef.current && st.connection === 'open'
+      && willFire({ ammo: selectAmmo(st), reloading: st.reloadingUntil > t, sinceLastShotS: t - lastShotAt.current, fireIntervalS: weapon.fire_interval_s })) {
+      lastShotAt.current = t;
+      st.predictShot(seq);
+    }
     if (loaded) setKick((k) => k + 1);
-    feedback(loaded ? 'fire' : 'empty', selectClass(st)?.id);
+    feedback(loaded ? 'fire' : 'empty', weapon?.id);
   }, []);
   const down = useCallback(() => {
     pull();
@@ -169,6 +182,9 @@ export function MatchScreen() {
   }), []);
 
   // ---- what the player feels and hears ----
+  // Sounds are readied while the phone is still being mounted, so the first shot does not wait for them.
+  const myWeapon = cls?.id;
+  useEffect(() => { if (s.prefs.sound && myWeapon) void preloadSounds(myWeapon); }, [s.prefs.sound, myWeapon]);
   const lastShot = s.shots[s.shots.length - 1];
   const lastDamage = s.damages[s.damages.length - 1];
   useEffect(() => { if (lastShot?.kind === 'hit') feedback('hit'); if (lastShot?.kind === 'kill') feedback('kill'); }, [lastShot?.key, lastShot?.kind]);
@@ -249,6 +265,7 @@ export function MatchScreen() {
   const mates = s.squad.filter((p) => p.id !== myId);
   const standing = mates.filter((p) => p.st === 'alive').map((p) => ({ name: nameOf(p.id), dist: distXY(me.x, me.y, p.x, p.y) })).sort((a, b) => a.dist - b.dist);
   const reloading = s.reloadingUntil > now;
+  const ammo = selectAmmo(s);
   const corner = (origin: ViewStyle['transformOrigin']): ViewStyle => (scale === 1 ? {} : { transform: [{ scale }], transformOrigin: origin });
 
   if (!deployed) {
@@ -283,7 +300,7 @@ export function MatchScreen() {
         {alive ? (
           <>
             <View style={{ position: 'absolute', left: width / 2 - hud.crosshair / 2, top: height / 2 - hud.crosshair / 2 }}>
-              <Crosshair onTarget={onTarget && !extracting} empty={s.ammo <= 0 && !reloading} kick={kick} />
+              <Crosshair onTarget={onTarget && !extracting} empty={ammo <= 0 && !reloading} kick={kick} />
             </View>
             <View style={{ position: 'absolute', left: 0, right: 0, top: height / 2 - 26, alignItems: 'center' }}>
               <HitMarker shot={lastShot} />
@@ -347,7 +364,7 @@ export function MatchScreen() {
         <View style={styles.bottom} pointerEvents="box-none">
           {alive ? (
             <View style={corner('bottom left')}>
-              <AmmoReadout ammo={s.ammo} magazine={cls.magazine} reloadingUntil={s.reloadingUntil} reloadS={cls.reload_s} now={now} />
+              <AmmoReadout ammo={ammo} magazine={cls.magazine} reloadingUntil={s.reloadingUntil} reloadS={cls.reload_s} now={now} />
             </View>
           ) : <View style={{ width: touch.fire }} />}
           <View style={[{ flex: 1, alignItems: 'center' }, corner('bottom')]} pointerEvents="box-none">
@@ -361,7 +378,7 @@ export function MatchScreen() {
           {alive ? (
             <View style={[{ flexDirection: 'row', alignItems: 'flex-end', gap: space[4] }, corner('bottom right')]}>
               <ReloadControl reloadingUntil={s.reloadingUntil} reloadS={cls.reload_s} now={now} onPress={() => net.reload()}
-                disabled={reloading || s.ammo >= cls.magazine} />
+                disabled={reloading || ammo >= cls.magazine} />
               <FireControl onTarget={onTarget} disabled={extracting} onDown={down} onUp={up} />
             </View>
           ) : <View style={{ width: touch.fire }} />}

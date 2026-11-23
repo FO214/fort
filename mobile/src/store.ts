@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { expire, settle, shownAmmo, type PendingShot } from './game/ammo';
 import { ZombieBuffer } from './game/zombies';
 import type { EndedMsg, GameMode, GunClass, LobbyPlayer, MapChoice, MapInfo, MissionState, PlayerSnap, RoomPhase, ServerMsg, Settings } from './net/types';
 
@@ -68,7 +69,12 @@ interface State {
   extract: { progress: number; need: number; holders: string[] };
   squad: PlayerSnap[];
   zombieCount: number;
+  /** The magazine as the server last reported it. The readout shows `selectAmmo`, which runs ahead of this. */
   ammo: number;
+  /** Pulls sent and not yet answered: already off the readout (see game/ammo.ts). */
+  pendingShots: PendingShot[];
+  /** A pull the phone expects to fire has just been sent as `seq`. */
+  predictShot: (seq: number) => void;
   reloadingUntil: number;
   shots: ShotFeedback[];
   damages: Damage[];
@@ -175,6 +181,8 @@ export const useStore = create<State>((set, get) => ({
   squad: [],
   zombieCount: 0,
   ammo: 0,
+  pendingShots: [],
+  predictShot: (seq) => set((st) => ({ pendingShots: [...st.pendingShots, { seq, at: Date.now() / 1000 }] })),
   reloadingUntil: 0,
   shots: [],
   damages: [],
@@ -259,7 +267,7 @@ export const useStore = create<State>((set, get) => ({
           phase: 'playing', roomPhase: 'playing', map: m.map, mission: m.mission, serverOffset: m.now - now,
           missionSeq: s.missionSeq + 1, ended: null, mode, startedAt: m.at ?? m.now,
           ...(fresh ? {
-            ammo: cls?.magazine ?? 0, reloadingUntil: 0, shots: [], damages: [], feed: [], squad: [], zombieCount: 0, extract: NO_EXTRACT,
+            ammo: cls?.magazine ?? 0, pendingShots: [], reloadingUntil: 0, shots: [], damages: [], feed: [], squad: [], zombieCount: 0, extract: NO_EXTRACT,
             // The run's opening line, shown as the HUD comes up.
             banner: mode === 'endless' ? bannerOf('Endless', 'objective', 'Hold out as long as you can') : bannerOf('Reach the helicopter', 'objective', 'Stay together'),
             // Only a start seen from the lobby needs the phone turned and mounted.
@@ -280,6 +288,9 @@ export const useStore = create<State>((set, get) => ({
           extract: { progress: m.ex[0], need: m.ex[1], holders: m.ex[2] },
         };
         if (me) { next.ammo = me.ammo; next.reloadingUntil = me.rl; }
+        // A pull that never got its answer stops counting against the readout.
+        const waiting = expire(s.pendingShots, now);
+        if (waiting !== s.pendingShots) next.pendingShots = [...waiting];
         if (s.phase !== 'playing' && s.roomPhase === 'playing') next.phase = 'playing';
         set(next);
         return;
@@ -289,7 +300,7 @@ export const useStore = create<State>((set, get) => ({
         const killed = m.hits.some(([, hp]) => hp <= 0);
         const kind = killed ? 'kill' : m.reason === 'hit' ? 'hit' : 'miss';
         const shot: ShotFeedback = { key: ++feedback, at: now, kind, reason: m.reason };
-        set({ ammo: m.ammo, shots: [...s.shots.slice(-5), shot] });
+        set({ ammo: m.ammo, pendingShots: settle(s.pendingShots, m.seq), shots: [...s.shots.slice(-5), shot] });
         return;
       }
       case 'zhit':
@@ -338,7 +349,7 @@ export const useStore = create<State>((set, get) => ({
         if (m.player_id === myId) set({ reloadingUntil: m.until });
         return;
       case 'reloaded':
-        if (m.player_id === myId) set({ ammo: m.ammo, reloadingUntil: 0 });
+        if (m.player_id === myId) set({ ammo: m.ammo, pendingShots: [], reloadingUntil: 0 });
         return;
       case 'ended': {
         zombies.clear();
@@ -393,6 +404,8 @@ async function persist(get: () => State, session?: Session | null) {
   try { await AsyncStorage.setItem(KEY, JSON.stringify(payload)); } catch { /* storage unavailable */ }
 }
 
+/** The ammo readout: the server's count, less the pulls it has not answered yet. */
+export const selectAmmo = (s: State) => shownAmmo(s.ammo, s.pendingShots);
 export const selectMe = (s: State) => s.squad.find((p) => p.id === s.session?.playerId);
 export const selectMyLobby = (s: State) => s.roster.find((p) => p.id === s.session?.playerId);
 export const selectClass = (s: State) => { const me = selectMyLobby(s); return me ? s.classes[me.cls] : undefined; };

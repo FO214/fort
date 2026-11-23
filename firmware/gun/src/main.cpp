@@ -30,7 +30,10 @@
 #define SERVER_PORT 8000       // used when a typed-in server has no ":port"
 #endif
 
-static const uint32_t DEBOUNCE_MS = 12;
+// A change is sent the instant the contact first moves: waiting to see that it
+// stays put would put that wait between the trigger and the shot. The button
+// is then left alone for this long, which is what swallows the bounce.
+static const uint32_t DEBOUNCE_MS = 25;
 static const uint16_t DISCOVERY_PORT = 8001;
 static const uint32_t PROBE_EVERY_MS = 2000;
 static const uint32_t REDISCOVER_AFTER_MS = 15000;   // server unreachable this long: look again
@@ -53,6 +56,9 @@ static const wifi_power_t TX_LEVELS[] = {WIFI_POWER_2dBm, WIFI_POWER_5dBm, WIFI_
 static const float TX_DBM[] = {2, 5, 8.5, 11, 13, 15, 17, 19.5};
 static const int TX_MAX = sizeof TX_DBM / sizeof TX_DBM[0] - 1;
 static int txIdx = TX_MAX;                 // join at full power, then settle
+// Never quieter than this (8.5 dBm). Below it the saving in heat is small and
+// frames start needing retries, which arrive at the game as lag.
+static const int TX_FLOOR = 2;
 static uint32_t txHoldUntil = 0;           // after a drop, don't lower for a while
 static float rssiAvg = 0;
 
@@ -74,7 +80,7 @@ static void adaptTx(uint32_t now) {
   rssiAvg = rssiAvg == 0 ? r : rssiAvg * 0.85f + r * 0.15f;
   float need = (17 - rssiAvg) - 70 + 3;
   static uint32_t lastLower = 0;
-  int want = 0;
+  int want = TX_FLOOR;
   while (want < TX_MAX && TX_DBM[want] < need) want++;
   if (want > txIdx) setTx(want);                          // raise at once
   else if (want < txIdx && now > txHoldUntil && now - lastLower > 10000 && TX_DBM[txIdx] - need > 6) {
@@ -89,14 +95,13 @@ static uint32_t pingSentAt = 0, rttMs = 0;
 struct Button {
   uint8_t pin;
   const char* name;
-  bool down;              // debounced state
-  bool lastRaw;
-  uint32_t changedAt;
+  bool down;              // the state last sent
+  uint32_t changedAt;     // when it last changed
 };
 
 static Button buttons[] = {
-  {PIN_TRIGGER, "trigger", false, false, 0},
-  {PIN_RELOAD,  "reload",  false, false, 0},
+  {PIN_TRIGGER, "trigger", false, 0},
+  {PIN_RELOAD,  "reload",  false, 0},
 };
 
 static WebSocketsClient ws;
@@ -232,6 +237,9 @@ static void runSetupPortal() {
 void setup() {
   setCpuFrequencyMhz(80);                                 // plenty for two buttons; Wi-Fi needs >= 80
   Serial.begin(115200);
+  // The log must never hold up a button. With a USB host attached that is not
+  // reading the port, a full log buffer would otherwise block each print.
+  Serial.setTxTimeoutMs(0);
   for (auto& b : buttons) pinMode(b.pin, INPUT_PULLUP);
   pinMode(PIN_RELOAD_GND, OUTPUT);
   digitalWrite(PIN_RELOAD_GND, LOW);
@@ -346,11 +354,11 @@ void loop() {
   if (online && now - lastPing > 10000) { lastPing = now; pingSentAt = now; ws.sendPing((uint8_t*)"rtt", 3); }
   for (auto& b : buttons) {
     bool raw = digitalRead(b.pin) == LOW;                 // pressed pulls the pin to ground
-    if (raw != b.lastRaw) { b.lastRaw = raw; b.changedAt = now; }
     if (raw != b.down && now - b.changedAt >= DEBOUNCE_MS) {
       b.down = raw;
+      b.changedAt = now;
+      sendBtn(b);                                         // first: nothing sits between the button and the send
       Serial.printf("%s %s\n", b.name, raw ? "down" : "up");
-      sendBtn(b);
     }
   }
   delay(1);                                               // let the CPU idle between polls
