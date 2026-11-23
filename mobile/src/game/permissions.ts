@@ -13,6 +13,9 @@
  * reads as granted. `?perm=ask` on the web build stands in for a phone that
  * has not been asked yet, for tests.
  */
+import * as ExpoCamera from 'expo-camera';
+import * as Location from 'expo-location';
+import * as Sensors from 'expo-sensors';
 import { useCallback, useEffect, useState } from 'react';
 import { Linking, Platform } from 'react-native';
 
@@ -37,12 +40,9 @@ interface Raw { status: string; canAskAgain?: boolean }
 const grant = (r: Raw | null): Grant => (r?.status === 'granted' ? 'granted' : r?.status === 'denied' ? 'denied' : 'undetermined');
 
 async function read(ask: boolean): Promise<PermissionState> {
-  const Camera = await import('expo-camera');
-  const Location = await import('expo-location');
-  const Sensors = await import('expo-sensors');
   // One at a time, so the OS shows one prompt after another rather than a pile.
   const location: Raw = ask ? await Location.requestForegroundPermissionsAsync() : await Location.getForegroundPermissionsAsync();
-  const camera: Raw = ask ? await Camera.Camera.requestCameraPermissionsAsync() : await Camera.Camera.getCameraPermissionsAsync();
+  const camera: Raw = ask ? await ExpoCamera.Camera.requestCameraPermissionsAsync() : await ExpoCamera.Camera.getCameraPermissionsAsync();
   let motion: Raw | null = null;
   try {
     if (await Sensors.DeviceMotion.isAvailableAsync()) {

@@ -6,6 +6,9 @@
  * All three emit the same events. Turning them into a position and a heading
  * is the job of game/tracking.ts.
  */
+import * as ExpoCamera from 'expo-camera';
+import * as Location from 'expo-location';
+import * as ExpoSensors from 'expo-sensors';
 import { Platform } from 'react-native';
 import { useStore } from '../store';
 
@@ -104,10 +107,8 @@ export function simHandle(): SimHandle {
 
 export async function requestPermissions(): Promise<{ location: boolean; camera: boolean }> {
   if (Platform.OS === 'web') return { location: true, camera: true };
-  const Location = await import('expo-location');
-  const Camera = await import('expo-camera');
   const loc = await Location.requestForegroundPermissionsAsync();
-  const cam = await Camera.Camera.requestCameraPermissionsAsync();
+  const cam = await ExpoCamera.Camera.requestCameraPermissionsAsync();
   return { location: loc.status === 'granted', camera: cam.status === 'granted' };
 }
 
@@ -161,8 +162,11 @@ function startWeb(listener: Listener): Stop {
   };
 }
 
+// The native modules are imported normally, at the top. A lazy `import()`
+// becomes a separate file in a production build, and Expo Go cannot fetch
+// one ("Unable to determine the production URL where additional JavaScript
+// chunks are hosted"), so the sensors never started.
 async function startNative(listener: Listener): Promise<Stop> {
-  const Location = await import('expo-location');
   const perm = await Location.requestForegroundPermissionsAsync();
   if (perm.status !== 'granted') {
     useStore.getState().setSensorError('Location permission needed');
@@ -184,7 +188,7 @@ async function startNative(listener: Listener): Promise<Stop> {
   // still runs on GPS and compass alone if the motion sensor is missing.
   let motionSub: { remove: () => void } | null = null;
   try {
-    const { DeviceMotion } = await import('expo-sensors');
+    const { DeviceMotion } = ExpoSensors;
     if (await DeviceMotion.isAvailableAsync()) {
       await DeviceMotion.requestPermissionsAsync().catch(() => null);
       DeviceMotion.setUpdateInterval(20);
