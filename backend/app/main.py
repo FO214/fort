@@ -23,6 +23,19 @@ from .room import GameError, Player, Room, RoomManager
 
 log = logging.getLogger("loonie")
 
+# Every gun connection and button press, one line each, in the server's own
+# output: which gun, which button, down or up, how many presses so far, and
+# what the server did with it. Its own handler, because uvicorn only prints
+# its own loggers.
+gunlog = logging.getLogger("loonie.guns")
+if not gunlog.handlers:
+    _h = logging.StreamHandler()
+    _h.setFormatter(logging.Formatter("%(asctime)s.%(msecs)03d  %(message)s", datefmt="%H:%M:%S"))
+    gunlog.addHandler(_h)
+    gunlog.setLevel(logging.INFO)
+    gunlog.propagate = False
+gun_presses: dict[str, dict[str, int]] = {}      # gun id -> button -> presses since the server started
+
 TICK_S = 0.05                 # simulation step: 20 Hz
 SNAPSHOT_EVERY = 2            # snapshots at 10 Hz
 DISCONNECT_GRACE_S = 90.0     # keep a dropped player's slot this long for resume
@@ -264,6 +277,8 @@ async def device_endpoint(ws: WebSocket) -> None:
         await hub.send(ws, {"t": "paired" if owner else "unpaired"})
         if owner:
             await hub.send_player(owner, {"t": "gun", "on": True})
+        gunlog.info("%s  connected from %s, %s", gun_id, ws.client.host if ws.client else "?",
+                    f"paired to {_player_label(owner)}" if owner else "not paired")
 
         while True:
             try:
@@ -277,6 +292,12 @@ async def device_endpoint(ws: WebSocket) -> None:
                 # Its player is gone (left, page reloaded, room closed): free the gun.
                 hub.devices.forget_player(owner)
                 owner = None
+            counts = gun_presses.setdefault(gun_id, {"trigger": 0, "reload": 0})
+            if msg.down:
+                counts[msg.b] += 1
+            what = f"{msg.b:<7} {'down' if msg.down else 'up  '}"
+            if msg.down:
+                what += f"  #{counts[msg.b]}"
             if owner is None:
                 # Unpaired: the first trigger pull may claim the gun.
                 if msg.b == "trigger" and msg.down:
@@ -284,7 +305,12 @@ async def device_endpoint(ws: WebSocket) -> None:
                     if owner:
                         await hub.send(ws, {"t": "paired"})
                         await hub.send_player(owner, {"t": "gun", "on": True})
+                        gunlog.info("%s  %s  paired it to %s", gun_id, what, _player_label(owner))
+                        continue
+                gunlog.info("%s  %s  ignored: not paired", gun_id, what)
                 continue
+            sent = msg.b == "trigger" or msg.down          # a reload release has nothing to send
+            gunlog.info("%s  %s  %s %s", gun_id, what, "->" if sent else "(not sent)", _player_label(owner))
             if msg.b == "trigger":
                 trigger_down = msg.down
                 await hub.send_player(owner, {"t": "trigger", "down": msg.down})
@@ -295,6 +321,9 @@ async def device_endpoint(ws: WebSocket) -> None:
     except Exception:
         log.exception("device socket error")
     finally:
+        if gun_id:
+            c = gun_presses.get(gun_id, {})
+            gunlog.info("%s  disconnected (so far: %d trigger, %d reload)", gun_id, c.get("trigger", 0), c.get("reload", 0))
         if gun_id and hub.guns.get(gun_id) is ws:
             del hub.guns[gun_id]
             owner = hub.devices.owner(gun_id)
@@ -302,6 +331,15 @@ async def device_endpoint(ws: WebSocket) -> None:
                 if trigger_down:               # never leave a gun firing after it drops
                     await hub.send_player(owner, {"t": "trigger", "down": False})
                 await hub.send_player(owner, {"t": "gun", "on": False})
+
+
+def _player_label(owner: Optional[tuple[str, str]]) -> str:
+    """"Ada in room KXTP", for the gun log."""
+    if owner is None:
+        return "nobody"
+    room = hub.rooms.get(owner[0])
+    p = room.players.get(owner[1]) if room else None
+    return f"{p.name if p else owner[1]} in room {owner[0]}"
 
 
 def _same_token(a: str, b: str) -> bool:
