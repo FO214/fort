@@ -10,6 +10,7 @@ import { StepDetector } from '../src/game/steps';
 import { PENDING_SHOT_S, expire, settle, shownAmmo, willFire } from '../src/game/ammo';
 import { EARSHOT_M, FULL_AT_M, HordeEar, RATE_MAX, RATE_MIN, hordeVoice, nearestDistance } from '../src/game/horde';
 import { lensMm, screenHfov, sensorHfov } from '../src/game/camera';
+import { WalkRecorder, walkLength } from '../src/game/walk';
 import { DEATH_FX_S, EYE_M, ZOMBIE_HEIGHT_M, ZombieBuffer, pickTargets, project, underCrosshair, type Camera } from '../src/game/zombies';
 import { Z_ATTACK, Z_CHASE } from '../src/net/types';
 import { FIGURE_ASPECT, ZOMBIE_KINDS, cellPlace, facing, frameAt, spriteBox, turnOf } from '../src/ui/spriteBox';
@@ -822,5 +823,33 @@ test.describe('camera field of view', () => {
     // A 1.25:1 tablet shows 1.25 / 1.333 of the image's width.
     expect(Math.tan(rad(screenHfov(67, 1000, 800) / 2))).toBeCloseTo(Math.tan(rad(33.5)) * (1.25 / (4 / 3)), 5);
     expect(Math.tan(rad(screenHfov(67, 844, 390, 4 / 3, 2) / 2))).toBeCloseTo(Math.tan(rad(33.5)) / 2, 5);
+  });
+});
+
+test.describe('walking the area', () => {
+  test('points are kept a stride apart, and standing still adds nothing', () => {
+    const r = new WalkRecorder();
+    for (let i = 0; i < 20; i++) r.add(0, 0);
+    r.add(0.3, 0);
+    expect(r.result().paths).toEqual([]);                            // one point is not a line
+    for (let x = 1; x <= 10; x++) r.add(x, 0);
+    expect(r.result().paths[0].length).toBe(11);
+    expect(r.length).toBeCloseTo(10, 5);
+  });
+
+  test('a GPS jump starts a new stretch instead of a corridor through the wall', () => {
+    const r = new WalkRecorder();
+    for (let x = 0; x <= 10; x++) r.add(x, 0);
+    for (let x = 0; x <= 10; x++) r.add(x, 40);                       // 40 m away in one sample
+    expect(r.result().paths.length).toBe(2);
+    expect(r.length).toBeCloseTo(20, 5);                             // the jump is not walking
+    expect(r.enough).toBe(true);
+  });
+
+  test('the helicopter mark and the length of a sent walk', () => {
+    const r = new WalkRecorder();
+    r.markHelicopter(3.14159, 2.71828);
+    expect(r.result().helicopter).toEqual([3.14, 2.72]);
+    expect(walkLength([[[0, 0], [3, 4]], [[10, 10], [10, 12]]])).toBeCloseTo(7, 5);
   });
 });
