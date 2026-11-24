@@ -32,6 +32,8 @@ export interface Pose {
   /** Map heading the camera faces, or null before the compass reports. */
   heading: number | null;
   pitch: number;
+  /** Degrees the view is tilted sideways, positive with its right side raised. */
+  roll: number;
 }
 
 class Tracking {
@@ -87,7 +89,7 @@ class Tracking {
     return {
       x: p.x, y: p.y, acc: p.acc, hasFix: p.hasFix,
       heading: o.heading == null ? null : norm360(o.heading - this.position.rotation),
-      pitch: o.pitch,
+      pitch: o.pitch, roll: o.roll,
     };
   }
 
@@ -116,8 +118,14 @@ class Tracking {
       case 'step':
         this.stepForward(t);
         return;
+      case 'up':
+        this.orientation.onUp(e.x, e.y, e.z, t);
+        return;
       case 'pitch':
         this.orientation.setPitch(e.deg);
+        return;
+      case 'roll':
+        this.orientation.setRoll(e.deg);
         return;
     }
   }

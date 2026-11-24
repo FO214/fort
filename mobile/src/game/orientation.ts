@@ -14,6 +14,31 @@ const COMPASS_TAU_S = 3;          // how quickly the compass corrects attitude d
 const SNAP_DEG = 45;              // further off than this is a jump (calibration), not drift
 const ATTITUDE_STALE_S = 0.5;     // no attitude for this long: fall back to the bare compass
 const PITCH_TAU_S = 0.06;
+/** Slower than pitch: gravity also carries every footstep's jolt. */
+const ROLL_TAU_S = 0.15;
+/** Tilted further than this, it is a phone being put away, not a gun being held. */
+const MAX_ROLL_DEG = 35;
+/** Pointed this steeply up or down, the screen's sideways tilt no longer means anything. */
+const ROLL_NEEDS = 0.35;
+
+/**
+ * How far the phone, held in landscape, is tilted about the camera's line of
+ * sight, in degrees: positive when its right-hand side (as the player sees
+ * the screen) is raised. `ux`, `uy`, `uz`: up along the phone's x, y and z axes.
+ *
+ * In landscape one of those axes is the screen's up. If +x is (top edge to
+ * the player's left), screen-right is -y; if -x, screen-right is +y. Either
+ * way it reduces to the formula below, so it does not need to know which way
+ * round the phone sits on the gun. Null when it is too steep to tell.
+ */
+export function rollFromUp(ux: number, uy: number, uz = 0): number | null {
+  const len = Math.hypot(ux, uy, uz);
+  if (!(len > 0)) return null;
+  const x = ux / len, y = uy / len;
+  // Not landscape any more (or looking straight up or down): no roll to speak of.
+  if (Math.abs(x) < ROLL_NEEDS) return null;
+  return deg(Math.atan2(-Math.sign(x) * y, Math.abs(x)));
+}
 
 /**
  * Camera elevation in degrees from the attitude angles (radians): 0 looking
@@ -30,12 +55,22 @@ export function pitchFromAttitude(beta: number, gamma: number): number {
   return deg(Math.asin(Math.max(-1, Math.min(1, v))));
 }
 
-export interface Pose { heading: number | null; pitch: number }
+/**
+ * Up, along the phone's x, y and z axes, from W3C attitude angles (radians):
+ * the vertical parts of those axes in R = Rz(alpha)·Rx(beta)·Ry(gamma).
+ */
+export function upFromAttitude(beta: number, gamma: number): { x: number; y: number; z: number } {
+  return { x: -Math.cos(beta) * Math.sin(gamma), y: Math.sin(beta), z: Math.cos(beta) * Math.cos(gamma) };
+}
+
+export interface Pose { heading: number | null; pitch: number; roll: number }
 
 export class OrientationTracker {
   private heading: number | null = null;
   private pitch = 0;
   private pitchT = 0;
+  private roll = 0;
+  private rollT = 0;
   private lastAlpha: number | null = null;
   private lastAttitudeT = -Infinity;
   private lastCompass: number | null = null;
@@ -47,7 +82,7 @@ export class OrientationTracker {
   private turnedCompass = 0;
 
   reset(): void {
-    this.heading = null; this.pitch = 0; this.lastAlpha = null; this.lastAttitudeT = -Infinity;
+    this.heading = null; this.pitch = 0; this.roll = 0; this.lastAlpha = null; this.lastAttitudeT = -Infinity;
     this.lastCompass = null; this.yawVote = -2; this.turnedYaw = this.turnedCompass = 0;
   }
 
@@ -84,10 +119,22 @@ export class OrientationTracker {
     this.lastAttitudeT = t;
   }
 
+  /** Which way is up along the phone's x, y and z axes (see `rollFromUp`). */
+  onUp(ux: number, uy: number, uz: number, t: number): void {
+    const dt = Math.max(0, t - this.rollT);
+    this.rollT = t;
+    const r = rollFromUp(ux, uy, uz);
+    const want = r == null ? 0 : Math.max(-MAX_ROLL_DEG, Math.min(MAX_ROLL_DEG, r));
+    this.roll += (want - this.roll) * (dt > 1 ? 1 : 1 - Math.exp(-dt / ROLL_TAU_S));
+  }
+
+  /** Tests and the simulator set roll directly. */
+  setRoll(roll: number): void { this.roll = roll; }
+
   /** Tests and the simulator set pitch directly. */
   setPitch(pitch: number): void { this.pitch = pitch; }
 
-  get(): Pose { return { heading: this.heading, pitch: this.pitch }; }
+  get(): Pose { return { heading: this.heading, pitch: this.pitch, roll: this.roll }; }
 
   /** Whether the attitude's yaw runs clockwise (+1) or counter-clockwise (-1). */
   get yawSign(): number { return this.yawVote < 0 ? -1 : 1; }

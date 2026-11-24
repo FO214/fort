@@ -294,3 +294,59 @@ def test_schmeichel_sits_where_the_real_building_is():
     o = m.outline
     area = abs(sum(x1 * y2 - x2 * y1 for (x1, y1), (x2, y2) in zip(o, o[1:] + o[:1]))) / 2
     assert 2900 < area < 3050
+
+
+# ------------------------------------------------------------------ sensible spawns
+
+def test_a_spawn_point_against_a_wall_or_outside_the_building_will_not_load():
+    for bad in ([10.2, 2], [25, 5]):                                    # in the dividing wall; out in the car park
+        with pytest.raises(ValueError, match="spawn point"):
+            MapData.from_dict({**TWO_ROOMS, "spawn_points": TWO_ROOMS["spawn_points"] + [bad]})
+
+
+def test_zombies_appear_where_the_player_is_not_looking(tworooms):
+    rng = random.Random(5)
+    me = (12.0, 5.0)                                     # just through the door, in the east room
+    facing_east = [tworooms.spawn_position(rng, [me], me, [(*me, 90.0)]) for _ in range(40)]
+    facing_west = [tworooms.spawn_position(rng, [me], me, [(*me, 270.0)]) for _ in range(40)]
+    # Looking into the east room: they come from the west room, behind her.
+    assert all(p[0] < 4 for p in facing_east)
+    # Looking back through the door: they come from the east room's corners.
+    assert all(p[0] > 16 for p in facing_west)
+
+
+def test_a_wall_hides_a_spawn_point_even_straight_ahead(tworooms):
+    me = (3.0, 8.0, 90.0)                                # west room, looking east at the dividing wall
+    assert not tworooms.in_view((18.0, 8.0), [me])       # dead ahead, but behind the wall
+    assert tworooms.in_view((18.0, 2.0), [me])           # in view through the door
+    assert not tworooms.in_view((2.0, 2.0), [me])        # behind her
+
+
+def test_spread_out_spawns_never_land_in_or_through_a_wall():
+    near_wall = MapData.from_dict({**TWO_ROOMS, "spawn_points": [[19.4, 2], [10.6, 8], [2, 2]]})
+    rng = random.Random(9)
+    for _ in range(300):
+        p = near_wall.spawn_position(rng, [(15.0, 5.0)])
+        assert near_wall.sensible_spot(p), p
+        assert any(near_wall.nav.clear(p, q) and math.dist(p, q) <= 1.5 for q in near_wall.spawn_points)
+
+
+def test_open_arena_spawns_stay_out_of_the_camera():
+    arena = mapdata.load_map("arena")
+    rng = random.Random(4)
+    for _ in range(200):
+        x, y = arena.spawn_position(rng, [(0.0, 0.0)], viewers=[(0.0, 0.0, 0.0)])     # looking north
+        assert abs((math.degrees(math.atan2(x, y)) + 180) % 360 - 180) > 45
+
+
+def test_the_room_hands_the_players_view_to_the_spawner(tworooms):
+    r = Room("T", Settings(map="tworooms"), now=0, rng=random.Random(2),
+             tuning=Tuning(grace_s=0.1, spawn_gap_s=0.1, wave_max_s=10_000))
+    a = r.add_player("Ada")
+    r.start(a.id, 0)
+    r.update_pos(a.id, 12, 5, 3, 90, 0)                                 # east room, looking east
+    t = 0.0
+    while t < 2 and not r.world.zombies:
+        t += 0.05
+        r.tick(t)
+    assert r.world.zombies and all(z.x < 4 for z in r.world.zombies.values())

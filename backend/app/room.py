@@ -360,8 +360,10 @@ class Room:
         if m.phase == "journey" and any(self._at_helicopter(p) for p in standing):
             events.extend(m.arrive(now))
 
-        keep_clear: list[Point] = [(p.x, p.y) for p in squad if p.state != "dead"]
-        events.extend(m.tick(now, keep_clear, lambda: self._spawn_anchor(standing)))
+        watching = [p for p in squad if p.state != "dead"]
+        keep_clear: list[Point] = [(p.x, p.y) for p in watching]
+        events.extend(m.tick(now, keep_clear, lambda: self._spawn_anchor(standing),
+                             [(p.x, p.y, p.heading) for p in watching]))
 
         if m.phase == "final":
             holders = [p.id for p in standing if p.extracting]

@@ -32,12 +32,34 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
-from .geo import dist_xy, from_local, to_local
+from .geo import angle_diff_deg, bearing_xy, dist_xy, from_local, to_local
 from .nav import Nav
 
 MAPS_DIR = Path(__file__).resolve().parent.parent / "maps"
 
 Point = tuple[float, float]
+Viewer = tuple[float, float, float]          # a player's x, y and the map heading their camera faces
+
+# A zombie's body is about 0.8 m across. Any nearer a wall than this and its
+# sprite is drawn half inside the wall.
+WALL_CLEAR_M = 0.5
+# The camera sees about 33° either side of where it points. A little more, so
+# a zombie does not appear the moment the player turns their head.
+VIEW_HALF_DEG = 45.0
+# Further than this a newly appeared zombie is a speck; it does not matter if it is seen.
+SIGHT_M = 45.0
+JITTER_M = 1.0
+JITTER_TRIES = 4
+RING_TRIES = 24
+
+
+def inside(poly: Sequence[Point], p: Point) -> bool:
+    """Is `p` inside the polygon? (Even-odd rule.)"""
+    odd = False
+    for (x1, y1), (x2, y2) in zip(poly, list(poly[1:]) + list(poly[:1])):
+        if (y1 > p[1]) != (y2 > p[1]) and p[0] < x1 + (p[1] - y1) * (x2 - x1) / (y2 - y1):
+            odd = not odd
+    return odd
 
 
 @dataclass
@@ -78,7 +100,7 @@ class MapData:
         if walls or graph:
             # Raises if a corridor edge runs through a wall: catch a bad map at load, not mid-game.
             nav = Nav(walls, (graph or {}).get("nodes"), [tuple(e) for e in (graph or {}).get("edges", [])])
-        return cls(
+        m = cls(
             id=d["id"], name=d.get("name", d["id"]),
             start=(float(d["start"][0]), float(d["start"][1])),
             helicopter=Helicopter(float(h["x"]), float(h["y"]), float(h.get("radius_m", 6.0)),
@@ -95,6 +117,11 @@ class MapData:
             graph=graph,
             nav=nav,
         )
+        for p in m.spawn_points:
+            # Like the corridor check: a bad spawn point is a map bug, so refuse to load it.
+            if not m.sensible_spot(p):
+                raise ValueError(f"spawn point {list(p)} is outside the building or against a wall")
+        return m
 
     def with_origin(self, lat: float, lon: float) -> "MapData":
         """A copy anchored to a real-world point. Maps that already have an
@@ -129,13 +156,36 @@ class MapData:
         return from_local(x, y, self.origin[0], self.origin[1], self.rotation_deg)
 
     # ---- spawning ----------------------------------------------------------
+    def sensible_spot(self, p: Point) -> bool:
+        """Somewhere a zombie could actually stand: inside the building (if
+        the map has one) and not half inside a wall."""
+        if self.outline and not inside(self.outline, p):
+            return False
+        return self.nav is None or not self.nav.walls or self.nav.wall_distance(p) >= WALL_CLEAR_M
+
+    def in_view(self, p: Point, viewers: Sequence[Viewer]) -> bool:
+        """Would a player see a zombie appear at `p`? Only if it is in front
+        of their camera, not too far off, and not behind a wall."""
+        for vx, vy, heading in viewers:
+            if dist_xy(vx, vy, p[0], p[1]) > SIGHT_M:
+                continue
+            if abs(angle_diff_deg(bearing_xy(vx, vy, p[0], p[1]), heading)) > VIEW_HALF_DEG:
+                continue
+            if self.nav is not None and not self.nav.clear((vx, vy), p):
+                continue
+            return True
+        return False
+
     def spawn_position(self, rng: random.Random, players: Sequence[Point],
-                       around: Optional[Point] = None) -> Point:
-        """Somewhere for a zombie to appear: never on top of a player, and
-        close enough that it reaches the squad while the wave still matters.
+                       around: Optional[Point] = None, viewers: Sequence[Viewer] = ()) -> Point:
+        """Somewhere for a zombie to appear: never on top of a player, close
+        enough that it reaches the squad while the wave still matters, on
+        open floor, and (whenever there is a choice) out of sight, so it
+        walks in from somewhere instead of popping into existence on screen.
 
         `around` is the point the wave is pressing on (a player, or the
-        helicopter during the hold); it defaults to the map start."""
+        helicopter during the hold); it defaults to the map start. `viewers`
+        are the players who might watch it appear."""
         centre = around or (players[0] if players else self.start)
 
         def clearance(p: Point) -> float:
@@ -144,29 +194,37 @@ class MapData:
         if self.spawn_mode == "points" and self.spawn_points:
             far_enough = [p for p in self.spawn_points if clearance(p) >= self.spawn_min_m]
             if far_enough:
+                unseen = [p for p in far_enough if not self.in_view(p, viewers)]
+                pool = unseen or far_enough
                 # Prefer the nearer half (by corridor, not through walls) so
                 # zombies do not spend the whole wave walking in.
                 walk = self.nav.route_length if self.nav else (lambda p, q: dist_xy(p[0], p[1], q[0], q[1]))
-                far_enough.sort(key=lambda p: walk(p, centre))
-                pick = rng.choice(far_enough[: max(1, (len(far_enough) + 1) // 2)])
+                pool.sort(key=lambda p: walk(p, centre))
+                pick = rng.choice(pool[: max(1, (len(pool) + 1) // 2)])
             else:
                 pick = max(self.spawn_points, key=clearance)
-            jittered = (pick[0] + rng.uniform(-1.0, 1.0), pick[1] + rng.uniform(-1.0, 1.0))
-            if self.nav and not self.nav.clear(pick, jittered):
-                return pick                    # the nudge would have put it inside a wall
-            return jittered
+            # Spread a wave out a little, but never into a wall, through one,
+            # or out of the building.
+            for _ in range(JITTER_TRIES):
+                jittered = (pick[0] + rng.uniform(-JITTER_M, JITTER_M), pick[1] + rng.uniform(-JITTER_M, JITTER_M))
+                if self.sensible_spot(jittered) and (self.nav is None or self.nav.clear(pick, jittered)):
+                    return jittered
+            return pick
 
+        # Ring: try a few spots and keep the best. Standing room beats being
+        # out of sight, which beats keeping a little more distance.
         best: Optional[Point] = None
-        best_clear = -1.0
-        for _ in range(12):
+        best_rank: tuple[bool, bool, bool, float] = (False, False, False, -1.0)
+        for _ in range(RING_TRIES):
             a = rng.uniform(0.0, 2 * math.pi)
             r = rng.uniform(self.spawn_min_m, self.spawn_max_m)
             p = (centre[0] + math.sin(a) * r, centre[1] + math.cos(a) * r)
             c = clearance(p)
-            if c >= self.spawn_min_m * 0.85:
+            rank = (self.sensible_spot(p), c >= self.spawn_min_m * 0.85, not self.in_view(p, viewers), c)
+            if all(rank[:3]):
                 return p
-            if c > best_clear:
-                best, best_clear = p, c
+            if rank > best_rank:
+                best, best_rank = p, rank
         assert best is not None
         return best
 

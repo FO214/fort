@@ -62,6 +62,16 @@ class Nav:
                 return False
         return True
 
+    def wall_distance(self, p: Point) -> float:
+        """How far `p` is from the nearest wall, in metres."""
+        best = math.inf
+        for x1, y1, x2, y2 in self.walls:
+            dx, dy = x2 - x1, y2 - y1
+            span = dx * dx + dy * dy
+            t = 0.0 if span == 0 else max(0.0, min(1.0, ((p[0] - x1) * dx + (p[1] - y1) * dy) / span))
+            best = min(best, math.hypot(p[0] - x1 - t * dx, p[1] - y1 - t * dy))
+        return best
+
     # ---- routes ------------------------------------------------------------
     def nearest_node(self, p: Point) -> Optional[str]:
         """The closest corridor node that can be walked to in a straight

@@ -10,6 +10,7 @@ import * as ExpoCamera from 'expo-camera';
 import * as Location from 'expo-location';
 import * as ExpoSensors from 'expo-sensors';
 import { Platform } from 'react-native';
+import { upFromAttitude } from '../game/orientation';
 import { useStore } from '../store';
 
 export type SensorEvent =
@@ -21,9 +22,16 @@ export type SensorEvent =
   | { k: 'attitude'; alpha: number; beta: number; gamma: number }
   /** Magnitude of acceleration including gravity, m/s². */
   | { k: 'accel'; magnitude: number }
+  /**
+   * Which way is up, along the phone's own x (right edge, in portrait),
+   * y (top edge) and z (out of the screen) axes. Any length; only the
+   * direction matters. Gives the roll.
+   */
+  | { k: 'up'; x: number; y: number; z: number }
   /** Simulator only: one step taken / camera pitch set directly. */
   | { k: 'step' }
-  | { k: 'pitch'; deg: number };
+  | { k: 'pitch'; deg: number }
+  | { k: 'roll'; deg: number };
 
 export type Listener = (e: SensorEvent) => void;
 export type Stop = () => void;
@@ -144,7 +152,11 @@ function startWeb(listener: Listener): Stop {
     else if (e.alpha != null && e.absolute) h = (360 - e.alpha) % 360;
     if (h != null) listener({ k: 'compass', bearing: corrected(h), acc: 10 });
     if (e.alpha != null && e.beta != null && e.gamma != null) {
-      listener({ k: 'attitude', alpha: e.alpha * toRad, beta: e.beta * toRad, gamma: e.gamma * toRad });
+      const beta = e.beta * toRad, gamma = e.gamma * toRad;
+      listener({ k: 'attitude', alpha: e.alpha * toRad, beta, gamma });
+      // Browsers agree on the attitude's conventions (W3C, Z-X-Y), but not on
+      // the sign of gravity, so up comes from the attitude here.
+      listener({ k: 'up', ...upFromAttitude(beta, gamma) });
     }
   };
   const onMotion = (e: DeviceMotionEvent) => {
@@ -199,6 +211,8 @@ async function startNative(listener: Listener): Promise<Stop> {
           const offset = offsetFromGravity(a.x, a.y);
           if (offset != null) headingOffset = offset;
           listener({ k: 'accel', magnitude: Math.hypot(a.x, a.y, a.z) });
+          // Gravity points at the floor (see offsetFromGravity), so up is the other way.
+          listener({ k: 'up', x: -a.x, y: -a.y, z: -a.z });
         }
       });
     }

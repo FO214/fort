@@ -3,13 +3,13 @@
  * step detection, and the projection/aiming maths.
  */
 import { test, expect } from '@playwright/test';
-import { fromLocal, toLocal, angleDiffDeg } from '../src/game/geo';
-import { OrientationTracker, pitchFromAttitude } from '../src/game/orientation';
+import { fromLocal, toLocal, angleDiffDeg, deg } from '../src/game/geo';
+import { OrientationTracker, pitchFromAttitude, rollFromUp, upFromAttitude } from '../src/game/orientation';
 import { PositionTracker, STEP_M } from '../src/game/position';
 import { StepDetector } from '../src/game/steps';
 import { PENDING_SHOT_S, expire, settle, shownAmmo, willFire } from '../src/game/ammo';
 import { EARSHOT_M, FULL_AT_M, HordeEar, RATE_MAX, RATE_MIN, hordeVoice, nearestDistance } from '../src/game/horde';
-import { DEATH_FX_S, ZombieBuffer, pickTargets, project, underCrosshair, type Camera } from '../src/game/zombies';
+import { DEATH_FX_S, EYE_M, ZOMBIE_HEIGHT_M, ZombieBuffer, pickTargets, project, underCrosshair, type Camera } from '../src/game/zombies';
 import { Z_ATTACK, Z_CHASE } from '../src/net/types';
 import { FIGURE_ASPECT, ZOMBIE_KINDS, cellPlace, facing, frameAt, spriteBox, turnOf } from '../src/ui/spriteBox';
 import { ZOMBIE_ANGLES, ZOMBIE_SHEETS } from '../src/ui/zombieSheets';
@@ -182,6 +182,40 @@ test.describe('orientation', () => {
     expect(pitchFromAttitude(0, rad(75))).toBeCloseTo(-15, 5);
   });
 
+  test('roll: level in landscape either way round, positive with the right side raised', () => {
+    // Top edge to the player's left: the phone's +x axis points up.
+    expect(rollFromUp(1, 0)).toBeCloseTo(0, 5);
+    expect(rollFromUp(-1, 0)).toBeCloseTo(0, 5);                     // the other way round
+    // Raise the right-hand side 10°. Screen-right is -y one way round, +y the other.
+    expect(rollFromUp(Math.cos(rad(10)), -Math.sin(rad(10)))).toBeCloseTo(10, 5);
+    expect(rollFromUp(-Math.cos(rad(10)), Math.sin(rad(10)))).toBeCloseTo(10, 5);
+    expect(rollFromUp(Math.cos(rad(10)), Math.sin(rad(10)))).toBeCloseTo(-10, 5);
+    expect(rollFromUp(0, 1)).toBeNull();                              // portrait
+    expect(rollFromUp(0, 0)).toBeNull();
+    expect(rollFromUp(0.01, 0, 1)).toBeNull();                        // lying flat: no idea
+  });
+
+  test('roll from the web attitude agrees with the pitch from it', () => {
+    // Level landscape, as in the pitch test: gamma ±90°, beta 0.
+    const a = upFromAttitude(0, rad(-90)), b = upFromAttitude(0, rad(90));
+    expect(rollFromUp(a.x, a.y, a.z)).toBeCloseTo(0, 5);
+    expect(rollFromUp(b.x, b.y, b.z)).toBeCloseTo(0, 5);
+    expect(a.x).toBeGreaterThan(0.99);                                // +x up
+    // Tilting up does not read as roll.
+    const up = upFromAttitude(0, rad(-110));
+    expect(rollFromUp(up.x, up.y, up.z)).toBeCloseTo(0, 5);
+  });
+
+  test('roll is smoothed, capped, and drops to level when it cannot be told', () => {
+    const o = new OrientationTracker();
+    for (let t = 0; t < 2; t += 0.02) o.onUp(Math.cos(rad(8)), -Math.sin(rad(8)), 0, t);
+    expect(o.get().roll).toBeCloseTo(8, 1);
+    for (let t = 2; t < 4; t += 0.02) o.onUp(Math.cos(rad(60)), -Math.sin(rad(60)), 0, t);
+    expect(o.get().roll).toBeCloseTo(35, 1);
+    for (let t = 4; t < 6; t += 0.02) o.onUp(0.01, 0, 1, t);
+    expect(o.get().roll).toBeCloseTo(0, 1);
+  });
+
   test('compass alone drives the heading when there is no motion sensor', () => {
     const o = new OrientationTracker();
     expect(o.get().heading).toBeNull();
@@ -297,7 +331,24 @@ test.describe('zombies', () => {
   test('tilting the gun up slides the world down the screen', () => {
     const level = project(0, 10, cam())!, up = project(0, 10, cam({ pitch: 10 }))!;
     expect(up.bottom).toBeGreaterThan(level.bottom + 50);
-    expect(up.bottom - up.top).toBeCloseTo(level.bottom - level.top, 5);
+    expect(Math.abs((up.bottom - up.top) / (level.bottom - level.top) - 1)).toBeLessThan(0.05);   // barely changes size
+  });
+
+  test('the feet are on the floor however far the gun is tilted', () => {
+    // Pointing the gun at the floor `d` metres ahead puts that spot in the
+    // middle of the screen, so a zombie standing there has its feet there too.
+    for (const d of [1.5, 3, 6, 12, 30]) {
+      const atFeet = deg(Math.atan(-EYE_M / d));
+      const p = project(0, d, cam({ pitch: atFeet }))!;
+      expect(p.bottom, `${d} m`).toBeCloseTo(195, 3);
+      expect(p.sx).toBeCloseTo(422, 5);
+    }
+    // ...and the head, aimed up at it.
+    const head = project(0, 4, cam({ pitch: deg(Math.atan((ZOMBIE_HEIGHT_M - EYE_M) / 4)) }))!;
+    expect(head.top).toBeCloseTo(195, 3);
+    // Aiming well down at a near one, it still stands on the floor rather than above it.
+    const down = project(0, 2.5, cam({ pitch: -40 }))!;
+    expect(down.bottom).toBeGreaterThan(down.top);
   });
 
   test('the sprite box puts the head and feet exactly where the projection says', () => {
