@@ -21,6 +21,8 @@ export interface Banner { key: string; at: number; title: string; detail?: strin
 export type GunLink = 'none' | 'pairing' | 'paired' | 'timeout' | 'lost';
 export interface Prefs {
   haptics: boolean; sound: boolean; hudScale: number;
+  /** Degrees added to the camera's field of view, for a phone the lens table gets wrong. */
+  fovTrim: number;
   /** The furthest wave this phone has reached in endless mode. */
   bestEndlessWave: number;
 }
@@ -124,7 +126,7 @@ interface State {
 /** `?profile=name` keeps a second simulated phone in the same browser from sharing this one's saved session. */
 const PROFILE = typeof window !== 'undefined' && !!window.location?.search ? new URLSearchParams(window.location.search).get('profile') : null;
 const KEY = PROFILE ? `loonie.prefs.v2:${PROFILE}` : 'loonie.prefs.v2';
-const DEFAULT_PREFS: Prefs = { haptics: true, sound: true, hudScale: 1, bestEndlessWave: 0 };
+const DEFAULT_PREFS: Prefs = { haptics: true, sound: true, hudScale: 1, fovTrim: 0, bestEndlessWave: 0 };
 /** Tests and the walkthrough can skip the deploy sequence with `?deploy=skip`. */
 const SKIP_DEPLOY = typeof window !== 'undefined' && !!window.location?.search
   && new URLSearchParams(window.location.search).get('deploy') === 'skip';

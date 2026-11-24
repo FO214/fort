@@ -9,6 +9,7 @@ import { PositionTracker, STEP_M } from '../src/game/position';
 import { StepDetector } from '../src/game/steps';
 import { PENDING_SHOT_S, expire, settle, shownAmmo, willFire } from '../src/game/ammo';
 import { EARSHOT_M, FULL_AT_M, HordeEar, RATE_MAX, RATE_MIN, hordeVoice, nearestDistance } from '../src/game/horde';
+import { lensMm, screenHfov, sensorHfov } from '../src/game/camera';
 import { DEATH_FX_S, EYE_M, ZOMBIE_HEIGHT_M, ZombieBuffer, pickTargets, project, underCrosshair, type Camera } from '../src/game/zombies';
 import { Z_ATTACK, Z_CHASE } from '../src/net/types';
 import { FIGURE_ASPECT, ZOMBIE_KINDS, cellPlace, facing, frameAt, spriteBox, turnOf } from '../src/ui/spriteBox';
@@ -793,5 +794,33 @@ test.describe('the ammo readout runs ahead of the server', () => {
     expect(willFire({ ...ok, reloading: true })).toBe(false);
     expect(willFire({ ...ok, sinceLastShotS: 0.2 })).toBe(false);          // faster than the weapon fires
     expect(willFire({ ...ok, sinceLastShotS: 0.35 })).toBe(true);          // the server allows 15% early
+  });
+});
+
+test.describe('camera field of view', () => {
+  test('equivalent focal lengths give the fields of view the makers quote', () => {
+    expect(sensorHfov(26)).toBeCloseTo(67.3, 1);                      // iPhone main camera
+    expect(sensorHfov(24)).toBeCloseTo(71.6, 1);                      // 14 Pro onwards
+    expect(sensorHfov(28)).toBeCloseTo(63.4, 1);                      // SE, 8
+  });
+
+  test('the lens is looked up from the phone model', () => {
+    expect(lensMm('iPhone 15 Pro Max', 'ios')).toBe(24);
+    expect(lensMm('iPhone 15', 'ios')).toBe(26);
+    expect(lensMm('iPhone SE', 'ios')).toBe(28);
+    expect(lensMm('iPhone XS', 'ios')).toBe(26);
+    expect(lensMm('iPhone X', 'ios')).toBe(28);
+    expect(lensMm('Pixel 8', 'android')).toBe(25);
+    expect(lensMm('SM-S921B', 'android')).toBe(24);
+    expect(lensMm('Mystery Phone', 'android')).toBe(25);
+    expect(lensMm(null, 'web')).toBe(26);
+  });
+
+  test('a long screen shows the whole width; a squarer one crops the sides; zoom narrows it', () => {
+    expect(screenHfov(67, 844, 390)).toBeCloseTo(67, 5);              // 19.5:9 phone
+    expect(screenHfov(67, 390, 844)).toBeCloseTo(67, 5);              // either way round
+    // A 1.25:1 tablet shows 1.25 / 1.333 of the image's width.
+    expect(Math.tan(rad(screenHfov(67, 1000, 800) / 2))).toBeCloseTo(Math.tan(rad(33.5)) * (1.25 / (4 / 3)), 5);
+    expect(Math.tan(rad(screenHfov(67, 844, 390, 4 / 3, 2) / 2))).toBeCloseTo(Math.tan(rad(33.5)) / 2, 5);
   });
 });

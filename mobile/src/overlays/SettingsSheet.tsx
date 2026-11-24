@@ -13,6 +13,8 @@ import { TextField } from '../ui/TextField';
 
 export const APP_VERSION = Constants.expoConfig?.version ?? '1.0.0';
 
+/** Camera-width trims offered, in degrees. */
+const FOV_TRIMS = [-6, -3, 0, 3, 6];
 const SCALE_LABEL: Record<number, string> = { [HUD_SCALES[0]]: 'Compact', [HUD_SCALES[1]]: 'Standard', [HUD_SCALES[2]]: 'Large' };
 
 /**
@@ -41,6 +43,15 @@ export function SettingsSheet({ onClose }: { onClose: () => void }) {
         <Segmented testID="pref-hud" value={prefs.hudScale} onChange={(hudScale) => setPrefs({ hudScale })}
           options={HUD_SCALES.map((v) => ({ value: v, label: SCALE_LABEL[v] }))} />
         <T v="caption" c={colors.textSecondary}>How large the in-mission display is drawn. It is read from the blaster, at arm's length.</T>
+      </View>
+
+      <View style={{ gap: space[2] }}>
+        <T v="overline" c={colors.textSecondary}>Camera width</T>
+        <Segmented testID="pref-fov" value={prefs.fovTrim} onChange={(fovTrim) => setPrefs({ fovTrim })}
+          options={FOV_TRIMS.map((v) => ({ value: v, label: v === 0 ? 'Auto' : `${v > 0 ? '+' : '−'}${Math.abs(v)}°` }))} />
+        <T v="caption" c={colors.textSecondary}>
+          Set from your phone's camera. If zombies slide across the floor as you turn, change it: wider if they run ahead of the turn, narrower if they lag behind.
+        </T>
       </View>
 
       <Divider />

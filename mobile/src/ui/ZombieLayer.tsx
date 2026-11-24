@@ -11,7 +11,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { angleDiffDeg, bearingXY } from '../game/geo';
 import { tracking } from '../game/tracking';
-import { CAMERA_HFOV_DEG, EYE_M, ZOMBIE_HEIGHT_M, pickTargets, project, type Camera } from '../game/zombies';
+import { cameraHfov } from '../game/deviceCamera';
+import { EYE_M, ZOMBIE_HEIGHT_M, pickTargets, project, type Camera } from '../game/zombies';
 import { Z_ATTACK, Z_IDLE, type GunClass } from '../net/types';
 import { serverNow, useStore, zombies } from '../store';
 import { colors } from '../theme';
@@ -86,6 +87,7 @@ export function ZombieLayer({ width, height, cls, aimRef, onAimChange, inset = 0
       if (ts - last < FRAME_MS) return;
       last = ts;
       const { width: w, height: h, cls: gun, onAimChange: notify } = dims.current;
+      const hfov = cameraHfov(w, h, useStore.getState().prefs.fovTrim);
       const pose = tracking.pose();
       const now = serverNow();
       const out: Item[] = [];
@@ -96,7 +98,7 @@ export function ZombieLayer({ width, height, cls, aimRef, onAimChange, inset = 0
       const spill = Math.abs(Math.sin((pose.roll * Math.PI) / 180)) * Math.max(w, h);
 
       if (pose.heading != null) {
-        const cam: Camera = { x: pose.x, y: pose.y, heading: pose.heading, pitch: pose.pitch, width: w, height: h, hfov: CAMERA_HFOV_DEG };
+        const cam: Camera = { x: pose.x, y: pose.y, heading: pose.heading, pitch: pose.pitch, width: w, height: h, hfov };
         const live = zombies.sample(now);
         if (gun) ids = pickTargets(live, cam, gun);
         const aimed = ids[0];
@@ -140,7 +142,7 @@ export function ZombieLayer({ width, height, cls, aimRef, onAimChange, inset = 0
             if (dist <= THREAT_RANGE_M) {
               const off = angleDiffDeg(bearingXY(cam.x, cam.y, z.x, z.y), cam.heading);
               // Just out of view sits high on the edge; directly behind sits low.
-              const behind = Math.min(1, Math.max(0, (Math.abs(off) - CAMERA_HFOV_DEG / 2) / (180 - CAMERA_HFOV_DEG / 2)));
+              const behind = Math.min(1, Math.max(0, (Math.abs(off) - hfov / 2) / (180 - hfov / 2)));
               unseen.push({
                 key: `t${z.id}`, id: z.id, side: off >= 0 ? 'right' : 'left', y: h * (0.3 + 0.42 * behind),
                 near: dist <= THREAT_RANGE_M / 2.5, color: colors.zombies[kind], dist,
