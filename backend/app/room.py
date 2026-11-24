@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from .geo import angle_diff_deg, bearing_xy, dist_xy
-from .mapdata import MapData, Point, load_map
+from .mapdata import WALK_ID, MapData, Point, load_map
 from .mission import REVIVE_HEALTH, Mission, Tuning
 from .models import CLASSES, DEFAULT_CLASS, Settings
 from .world import Bite, World
@@ -30,6 +30,11 @@ ZOMBIE_HALF_WIDTH_M = 0.35
 POS_SLACK_M = 1.5
 ANGLE_SLACK_DEG = 6.0
 RANGE_SLACK_M = 3.0
+
+# Free play: limits on a walked area, and how far the helicopter must be from the start.
+MAX_WALK_POINTS = 4000
+MAX_WALK_M = 500.0
+MIN_HELI_M = 12.0
 
 
 @dataclass
@@ -103,10 +108,8 @@ class Room:
         self.host_id: Optional[str] = None
         self.players: dict[str, Player] = {}
         self.created_at = now if now is not None else time.time()
-        try:
-            self.map: MapData = load_map(settings.map)
-        except KeyError:
-            raise GameError("Unknown map") from None
+        self.walked: Optional[MapData] = None          # free play: the area the host walked
+        self.map: MapData = self._load(settings.map)
         self.world = World(self.map.nav)
         self.mission: Optional[Mission] = None
         self.started_at = 0.0
@@ -151,12 +154,42 @@ class Room:
             raise GameError("Only the host can change the map")
         if self.phase != "lobby":
             raise GameError("The map locks when the mission starts")
-        try:
-            self.map = load_map(map_id)
-        except KeyError:
-            raise GameError("Unknown map") from None
+        if map_id == WALK_ID and self.walked is None:
+            # Picking free play before walking it: keep the map, the phone shows how to walk it.
+            self.settings = self.settings.model_copy(update={"map": map_id})
+            return
+        self.map = self._load(map_id)
         self.settings = self.settings.model_copy(update={"map": map_id})
         self.world = World(self.map.nav)
+
+    def set_area(self, pid: str, origin: tuple[float, float], paths: list[list[tuple[float, float]]],
+                 helicopter: Optional[tuple[float, float]] = None) -> None:
+        """Host walked the area for free play: that walk is now the map."""
+        if pid != self.host_id:
+            raise GameError("Only the host can map the area")
+        if self.phase != "lobby":
+            raise GameError("The map locks when the mission starts")
+        if sum(len(path) for path in paths) > MAX_WALK_POINTS:
+            raise GameError("That walk is too long to use")
+        if any(abs(c) > MAX_WALK_M for path in paths for p in path for c in p):
+            raise GameError("That walk wanders too far")
+        try:
+            self.walked = MapData.from_walk(paths, origin, helicopter)
+        except ValueError as e:
+            raise GameError(str(e)) from None
+        self.settings = self.settings.model_copy(update={"map": WALK_ID})
+        self.map = self.walked
+        self.world = World(self.map.nav)
+
+    def _load(self, map_id: str) -> MapData:
+        if map_id == WALK_ID:
+            if self.walked is None:
+                raise GameError("Walk the area first")
+            return self.walked
+        try:
+            return load_map(map_id)
+        except KeyError:
+            raise GameError("Unknown map") from None
 
     def set_mode(self, pid: str, mode: str) -> None:
         """Host picks how the run is played: the mission, or endless waves."""
@@ -174,7 +207,10 @@ class Room:
             raise GameError("Only the host can start")
         if self.phase != "lobby":
             raise GameError("Mission already started")
-        game_map = load_map(self.settings.map)
+        game_map = self._load(self.settings.map)
+        if (self.settings.mode == "mission"
+                and dist_xy(*game_map.start, game_map.helicopter.x, game_map.helicopter.y) < MIN_HELI_M):
+            raise GameError(f"The helicopter is under {MIN_HELI_M:.0f} m from the start: walk further, or play endless")
         if lat is not None and lon is not None:
             game_map = game_map.with_origin(lat, lon)
         self.map = game_map
@@ -207,7 +243,7 @@ class Room:
         self.phase = "lobby"
         self.mission = None
         self.ended = None
-        self.map = load_map(self.settings.map)       # a mission may have anchored it; start clean
+        self.map = self._load(self.settings.map)     # a mission may have anchored it; start clean
         self.world = World(self.map.nav)
         for p in self.players.values():
             p.ready = False

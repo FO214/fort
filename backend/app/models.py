@@ -97,6 +97,16 @@ class SetMap(BaseModel):
     map: str = Field(pattern=r"^[a-z0-9_-]{1,32}$")
 
 
+class SetArea(BaseModel):
+    """Host only, in the lobby: the area they just walked, for free play.
+    `paths` are stretches of walking in metres from `origin` (x east, y
+    north); `helicopter` is where they marked it, if they did."""
+    t: Literal["set_area"]
+    origin: tuple[float, float]
+    paths: list[list[tuple[float, float]]] = Field(min_length=1, max_length=20)
+    helicopter: Optional[tuple[float, float]] = None
+
+
 class SetMode(BaseModel):
     """Host only, in the lobby: mission or endless."""
     t: Literal["set_mode"]

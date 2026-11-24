@@ -62,6 +62,10 @@ class Nav:
                 return False
         return True
 
+    def standable(self, p: Point, clearance: float = 0.5) -> bool:
+        """Could a zombie stand here without overlapping a wall?"""
+        return not self.walls or self.wall_distance(p) >= clearance
+
     def wall_distance(self, p: Point) -> float:
         """How far `p` is from the nearest wall, in metres."""
         best = math.inf
