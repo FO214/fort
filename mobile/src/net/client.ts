@@ -102,6 +102,10 @@ class NetClient {
   setClass(cls: string) { this.send({ t: 'set_class', cls }); }
   /** Host only, in the lobby. */
   setMap(map: string) { this.send({ t: 'set_map', map }); }
+  /** Free play: the area the host just walked, in metres from `origin`. */
+  setArea(origin: [number, number], paths: [number, number][][], helicopter: [number, number] | null) {
+    this.send({ t: 'set_area', origin, paths, helicopter });
+  }
   /** Host only, in the lobby: the mission, or endless waves. */
   setMode(mode: GameMode) { this.send({ t: 'set_mode', mode }); }
   /** Host only. The fix (if any) anchors a map that has no fixed place in the world. */

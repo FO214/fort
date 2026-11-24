@@ -190,16 +190,26 @@ class GridNav(Nav):
     # ---- the corridor graph ----------------------------------------------------
     def _lay_nodes(self, seeds: Sequence[Sequence[Point]]) -> dict[str, Point]:
         nodes: dict[str, Point] = {}
+        near: dict[tuple[int, int], list[Point]] = {}        # nodes by square, to check spacing quickly
+
+        def gap(p: Point) -> float:
+            bx, by = int(p[0] // NODE_SPACING_M), int(p[1] // NODE_SPACING_M)
+            return min((math.dist(p, q) for dx in (-1, 0, 1) for dy in (-1, 0, 1)
+                        for q in near.get((bx + dx, by + dy), ())), default=math.inf)
 
         def far_from_all(p: Point) -> bool:
-            return all(math.dist(p, q) >= NODE_SPACING_M * 0.6 for q in nodes.values())
+            return gap(p) >= NODE_SPACING_M * 0.6
+
+        def add(p: Point) -> None:
+            nodes[f"n{len(nodes)}"] = p
+            near.setdefault((int(p[0] // NODE_SPACING_M), int(p[1] // NODE_SPACING_M)), []).append(p)
 
         # Along the walked paths first, every NODE_SPACING_M.
         for path in seeds:
             for p in resample(path, NODE_SPACING_M):
                 q = self.snap(p)
                 if q and far_from_all(q):
-                    nodes[f"n{len(nodes)}"] = q
+                    add(q)
         # Every corner of the open floor: the shortest way round anything
         # passes its corners, and a narrow gap (beside a table, a doorway)
         # always has corners at both ends.
@@ -207,8 +217,8 @@ class GridNav(Nav):
             for c in range(self.cols):
                 if self._corner(c, r):
                     p = self._centre(c, r)
-                    if all(math.dist(p, q) >= self.cell * 1.5 for q in nodes.values()):
-                        nodes[f"n{len(nodes)}"] = p
+                    if gap(p) >= self.cell * 1.5:
+                        add(p)
         # Then a lattice over whatever open floor is not covered yet, so
         # anywhere on the floor has a node in sight.
         step = max(1, int(round(NODE_SPACING_M / self.cell)))
@@ -217,7 +227,7 @@ class GridNav(Nav):
                 if self.open[r * self.cols + c]:
                     p = self._centre(c, r)
                     if far_from_all(p):
-                        nodes[f"n{len(nodes)}"] = p
+                        add(p)
         return nodes
 
     def _at(self, c: int, r: int) -> bool:

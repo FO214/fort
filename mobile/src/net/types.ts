@@ -32,6 +32,10 @@ export interface MapInfo {
   /** Wall segments `[x1, y1, x2, y2]`. */
   walls: [number, number, number, number][];
   labels: { text: string; x: number; y: number }[];
+  /** Furniture and the like that zombies walk round. */
+  obstacles?: [number, number][][];
+  /** A walked area (free play): where the host walked, which is the only open floor. */
+  paths?: [number, number][][];
 }
 
 export interface MapChoice { id: string; name: string }

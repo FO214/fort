@@ -146,3 +146,11 @@ def test_a_mission_needs_the_helicopter_a_walk_away():
         r.start(a.id, 0)
     r.set_mode(a.id, "endless")
     r.start(a.id, 0)                                       # endless has no helicopter to reach
+
+
+def test_the_drawn_walk_keeps_its_shape_with_far_fewer_points():
+    wiggly = [[(x * 0.5, (0.1 if x % 2 else -0.1)) for x in range(80)] + [(40, y * 0.5) for y in range(1, 60)]]
+    m = MapData.from_walk(wiggly, (43.0, -81.0))
+    drawn = m.public()["paths"][0]
+    assert len(drawn) <= 6                                  # a corridor and a turn, not 139 points
+    assert drawn[0] == [0.0, -0.1] and drawn[-1] == [40.0, 29.5]

@@ -75,6 +75,21 @@ class Tracking {
     if (f && t - f.t < FRESH_FIX_S) this.position.onGps(f.lat, f.lon, f.acc, t);
   }
 
+  /**
+   * Free play: start measuring from here, before there is a map. The
+   * newest fix becomes (0, 0), x east and y north; the walk is recorded in
+   * those metres and the server makes the map in them, so the mission's
+   * frame turns out the same one.
+   */
+  beginWalk(): [number, number] | null {
+    const f = this.lastFix;
+    if (!f) return null;
+    const t = clock();
+    this.position.setFrame({ origin: [f.lat, f.lon], rotation_deg: 0, start: [0, 0] }, t);
+    this.position.onGps(f.lat, f.lon, f.acc, t);
+    return [f.lat, f.lon];
+  }
+
   /** The gun just fired; do not mistake the jolt for a step. */
   noteShot(): void { this.steps.mute(clock() + SHOT_MUTE_S); }
 

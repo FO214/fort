@@ -64,6 +64,34 @@ WALK_SPAWN_EVERY_M = 3.0
 WALK_SPAWN_MIN_M = 9.0
 JITTER_TRIES = 4
 RING_TRIES = 24
+SPAWN_CANDIDATES = 48         # spawn points weighed per zombie, at most
+
+
+DRAW_TOLERANCE_M = 0.3       # a drawn path may stray this far from the walk
+
+
+def simplify(path: Sequence[Point], tol: float) -> list[Point]:
+    """The fewest points that keep the line within `tol` of `path` (Douglas-Peucker)."""
+    if len(path) < 3:
+        return list(path)
+    keep = [False] * len(path)
+    keep[0] = keep[-1] = True
+    stack = [(0, len(path) - 1)]
+    while stack:
+        i, j = stack.pop()
+        (ax, ay), (bx, by) = path[i], path[j]
+        dx, dy = bx - ax, by - ay
+        span = math.hypot(dx, dy)
+        worst, at = 0.0, -1
+        for k in range(i + 1, j):
+            px, py = path[k]
+            d = abs(dy * (px - ax) - dx * (py - ay)) / span if span else math.hypot(px - ax, py - ay)
+            if d > worst:
+                worst, at = d, k
+        if worst > tol:
+            keep[at] = True
+            stack += [(i, at), (at, j)]
+    return [p for p, k in zip(path, keep) if k]
 
 
 def inside(poly: Sequence[Point], p: Point) -> bool:
@@ -160,7 +188,8 @@ class MapData:
         if helicopter is not None:
             heli = nav.snap(helicopter) or helicopter
         else:
-            heli = max((p for path in walk for p in path), key=lambda p: nav.route_length(start, p))
+            # Walking distances are measured to their end point, so measure them all to the start: one route tree.
+            heli = max((p for path in walk for p in path), key=lambda p: nav.route_length(p, start))
         spots = [p for path in walk for p in resample(path, WALK_SPAWN_EVERY_M)]
         return cls(
             id=WALK_ID, name=name, start=start, helicopter=Helicopter(heli[0], heli[1]),
@@ -192,7 +221,8 @@ class MapData:
             "walls": [list(w) for w in self.walls],
             "labels": self.labels,
             "obstacles": [[list(p) for p in poly] for poly in self.obstacles],
-            "paths": [[[round(p[0], 2), round(p[1], 2)] for p in path] for path in self.paths],
+            # Phones draw these on the minimap every frame: send only the points the shape needs.
+            "paths": [[[round(p[0], 2), round(p[1], 2)] for p in simplify(path, DRAW_TOLERANCE_M)] for path in self.paths],
         }
 
     # ---- coordinates -------------------------------------------------------
@@ -244,6 +274,9 @@ class MapData:
 
         if self.spawn_mode == "points" and self.spawn_points:
             far_enough = [p for p in self.spawn_points if clearance(p) >= self.spawn_min_m]
+            if len(far_enough) > SPAWN_CANDIDATES:
+                # A big walked area has hundreds; a fair sample keeps each spawn cheap.
+                far_enough = rng.sample(far_enough, SPAWN_CANDIDATES)
             if far_enough:
                 unseen = [p for p in far_enough if not self.in_view(p, viewers)]
                 pool = unseen or far_enough

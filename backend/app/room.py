@@ -165,21 +165,34 @@ class Room:
     def set_area(self, pid: str, origin: tuple[float, float], paths: list[list[tuple[float, float]]],
                  helicopter: Optional[tuple[float, float]] = None) -> None:
         """Host walked the area for free play: that walk is now the map."""
-        if pid != self.host_id:
-            raise GameError("Only the host can map the area")
-        if self.phase != "lobby":
-            raise GameError("The map locks when the mission starts")
+        self.use_area(pid, self.build_area(pid, origin, paths, helicopter))
+
+    def build_area(self, pid: str, origin: tuple[float, float], paths: list[list[tuple[float, float]]],
+                   helicopter: Optional[tuple[float, float]] = None) -> MapData:
+        """The map a walk makes. Changes nothing, so the server can run it off
+        its game loop (a long walk takes a few tenths of a second)."""
+        self._may_map(pid)
         if sum(len(path) for path in paths) > MAX_WALK_POINTS:
             raise GameError("That walk is too long to use")
         if any(abs(c) > MAX_WALK_M for path in paths for p in path for c in p):
             raise GameError("That walk wanders too far")
         try:
-            self.walked = MapData.from_walk(paths, origin, helicopter)
+            return MapData.from_walk(paths, origin, helicopter)
         except ValueError as e:
             raise GameError(str(e)) from None
+
+    def use_area(self, pid: str, walked: MapData) -> None:
+        self._may_map(pid)                              # still host, still in the lobby
+        self.walked = walked
         self.settings = self.settings.model_copy(update={"map": WALK_ID})
         self.map = self.walked
         self.world = World(self.map.nav)
+
+    def _may_map(self, pid: str) -> None:
+        if pid != self.host_id:
+            raise GameError("Only the host can map the area")
+        if self.phase != "lobby":
+            raise GameError("The map locks when the mission starts")
 
     def _load(self, map_id: str) -> MapData:
         if map_id == WALK_ID:

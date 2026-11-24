@@ -365,7 +365,8 @@ async def handle(room: Room, p: Player, msg: Any, now: float, ws: WebSocket) -> 
         room.set_map(p.id, msg.map)
         await hub.broadcast(code, room.lobby_state())
     elif isinstance(msg, m.SetArea):
-        room.set_area(p.id, msg.origin, msg.paths, msg.helicopter)
+        walked = await asyncio.to_thread(room.build_area, p.id, msg.origin, msg.paths, msg.helicopter)
+        room.use_area(p.id, walked)
         await hub.broadcast(code, room.lobby_state())
     elif isinstance(msg, m.SetMode):
         room.set_mode(p.id, msg.mode)

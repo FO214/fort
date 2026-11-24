@@ -11,13 +11,15 @@ do not use this module at all; the open arena is one of those.
 from __future__ import annotations
 
 import heapq
+from collections import OrderedDict
 import math
 from typing import Optional, Sequence
 
 Point = tuple[float, float]
 Wall = tuple[float, float, float, float]
 
-AT_NODE_M = 0.6            # this close to a corridor node counts as standing on it
+AT_NODE_M = 0.6
+TREES_KEPT = 32           # route trees kept: a few per player, as they move from node to node            # this close to a corridor node counts as standing on it
 
 
 def _orient(a: Point, b: Point, c: Point) -> float:
@@ -46,8 +48,10 @@ class Nav:
             d = math.dist(self.nodes[a], self.nodes[b])
             self._adj[a].append((b, d))
             self._adj[b].append((a, d))
-        # next_hop[a][b]: the neighbour of a to walk to on the shortest way to b.
-        self.next_hop: dict[str, dict[str, str]] = {a: self._routes_from(a) for a in self.nodes}
+        # Routes are worked out on demand (see `toward`), not for every pair up front:
+        # that grows with the square of the map and a big walked area has thousands of nodes.
+        self._trees: OrderedDict[str, tuple[dict[str, str], dict[str, float]]] = OrderedDict()
+        self.next_hop = _Hops(self)
 
     # ---- line of sight -----------------------------------------------------
     def clear(self, p: Point, q: Point) -> bool:
@@ -92,6 +96,21 @@ class Nav:
                 best, best_d = name, d
         return best or fallback
 
+    def toward(self, goal: str) -> tuple[dict[str, str], dict[str, float]]:
+        """Every node that can reach `goal`: the neighbour to step to on the
+        shortest way there, and how far it is. Worked out the first time a
+        goal is asked for and kept for the last few goals, which is what a
+        wave needs: zombies only ever head for the nodes the players are near."""
+        tree = self._trees.get(goal)
+        if tree is None:
+            tree = self._tree(goal)
+            self._trees[goal] = tree
+            if len(self._trees) > TREES_KEPT:
+                self._trees.popitem(last=False)
+        else:
+            self._trees.move_to_end(goal)
+        return tree
+
     def waypoint(self, frm: Point, to: Point) -> Point:
         """Where to walk next to get from `frm` to `to`. Straight there if
         nothing is in the way, otherwise the next corner on the way round."""
@@ -101,16 +120,17 @@ class Nav:
         if a is None or b is None:
             return to
         here = self.nodes[a]
-        if a == b or b not in self.next_hop[a]:
+        step, _ = self.toward(b)
+        if a == b or a not in step:
             # Last stretch (or no route at all): finish in a straight line, so
             # a player whose GPS puts them inside a wall can still be reached.
             return to if math.dist(frm, here) < AT_NODE_M else here
-        nxt = self.next_hop[a][b]
+        nxt = step[a]
         if not self.clear(frm, self.nodes[nxt]):
             return here                                # get onto the corridor first
         # Cut the corner: aim at the furthest node of the route still in view.
-        while nxt != b and self.clear(frm, self.nodes[self.next_hop[nxt][b]]):
-            nxt = self.next_hop[nxt][b]
+        while nxt != b and self.clear(frm, self.nodes[step[nxt]]):
+            nxt = step[nxt]
         return self.nodes[nxt]
 
     def route_length(self, frm: Point, to: Point) -> float:
@@ -119,31 +139,51 @@ class Nav:
         if not self.nodes or self.clear(frm, to):
             return math.dist(frm, to)
         a, b = self.nearest_node(frm), self.nearest_node(to)
-        if a is None or b is None or (a != b and b not in self.next_hop[a]):
+        if a is None or b is None:
             return math.dist(frm, to)
-        total, cur = math.dist(frm, self.nodes[a]), a
-        while cur != b:
-            nxt = self.next_hop[cur][b]
-            total += math.dist(self.nodes[cur], self.nodes[nxt])
-            cur = nxt
-        return total + math.dist(self.nodes[b], to)
+        _, far = self.toward(b)
+        if a not in far:
+            return math.dist(frm, to)
+        return math.dist(frm, self.nodes[a]) + far[a] + math.dist(self.nodes[b], to)
 
-    def _routes_from(self, start: str) -> dict[str, str]:
-        """Dijkstra from `start`: for every reachable node, the first step."""
-        dist: dict[str, float] = {start: 0.0}
-        first: dict[str, str] = {}
-        heap: list[tuple[float, str, Optional[str]]] = [(0.0, start, None)]
+    def _tree(self, goal: str) -> tuple[dict[str, str], dict[str, float]]:
+        """Dijkstra out from `goal`. The graph runs both ways, so the node a
+        search reached each node from is that node's next step toward `goal`."""
+        far: dict[str, float] = {goal: 0.0}
+        step: dict[str, str] = {}
+        heap: list[tuple[float, str]] = [(0.0, goal)]
         done: set[str] = set()
         while heap:
-            d, node, via = heapq.heappop(heap)
+            d, node = heapq.heappop(heap)
             if node in done:
                 continue
             done.add(node)
-            if via is not None:
-                first[node] = via
             for nb, w in self._adj[node]:
                 nd = d + w
-                if nd < dist.get(nb, math.inf):
-                    dist[nb] = nd
-                    heapq.heappush(heap, (nd, nb, via if via is not None else nb))
-        return first
+                if nd < far.get(nb, math.inf):
+                    far[nb] = nd
+                    step[nb] = node
+                    heapq.heappush(heap, (nd, nb))
+        return step, far
+
+
+class _Hops:
+    """`next_hop[a][b]`: the neighbour of a on the shortest way to b, and
+    `b in next_hop[a]` if there is a way at all. A view over `Nav.toward`."""
+
+    def __init__(self, nav: Nav) -> None:
+        self._nav = nav
+
+    def __getitem__(self, a: str) -> "_From":
+        return _From(self._nav, a)
+
+
+class _From:
+    def __init__(self, nav: Nav, a: str) -> None:
+        self._nav, self._a = nav, a
+
+    def __contains__(self, b: str) -> bool:
+        return self._a in self._nav.toward(b)[0]
+
+    def __getitem__(self, b: str) -> str:
+        return self._nav.toward(b)[0][self._a]
