@@ -9,9 +9,9 @@ import json
 import os
 import random
 from dataclasses import dataclass, fields
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Sequence
 
-from .mapdata import MapData, Point
+from .mapdata import MapData, Point, Viewer
 from .world import WALKER, World
 
 Event = dict[str, Any]
@@ -114,14 +114,17 @@ class Mission:
 
     # ---- driving ---------------------------------------------------------------
     def tick(self, now: float, living: list[Point],
-             pick_anchor: Optional[Callable[[], Optional[Point]]] = None) -> list[Event]:
+             pick_anchor: Optional[Callable[[], Optional[Point]]] = None,
+             viewers: Sequence[Viewer] = ()) -> list[Event]:
         """`living` are the positions zombies must keep clear of when they
-        spawn. `pick_anchor` chooses who the next zombie is aimed at."""
+        spawn. `pick_anchor` chooses who the next zombie is aimed at.
+        `viewers` are where players stand and look, so zombies can appear
+        out of their sight."""
         events: list[Event] = []
 
         if self.to_spawn > 0 and now >= self.next_spawn_at and len(self.world.zombies) < self.t.max_zombies:
             anchor = pick_anchor() if pick_anchor else None
-            x, y = self.map.spawn_position(self.rng, living, anchor)
+            x, y = self.map.spawn_position(self.rng, living, anchor, viewers)
             self.world.spawn(WALKER, x, y, self.zombie_hp_scale())
             self.to_spawn -= 1
             self.next_spawn_at = now + self.t.spawn_gap_s

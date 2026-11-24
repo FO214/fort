@@ -163,20 +163,32 @@ export interface Placed {
   off: number;
 }
 
-/** Where a standing figure at (x, y) lands on screen; null if it is behind the camera. */
+/** Nearer than this in front of the lens a point is clamped, so it lands far off screen rather than flipping. */
+const NEAR_PLANE_M = 0.1;
+
+/**
+ * Where a standing figure at (x, y) lands on screen; null if it is behind the camera.
+ *
+ * A true pinhole camera tilted by `pitch`: the floor at the figure's distance
+ * is where the camera really sees the floor, however far the gun is tilted
+ * up or down, so the feet stay on it. (Shifting a level view up and down
+ * instead is close at the horizon but lifts zombies off the floor, or sinks
+ * them into it, when aiming down at a near one.)
+ */
 export function project(x: number, y: number, cam: Camera): Placed | null {
   const dist = Math.max(Math.hypot(x - cam.x, y - cam.y), 0.3);
   const off = angleDiffDeg(bearingXY(cam.x, cam.y, x, y), cam.heading);
   if (Math.abs(off) > 80) return null;
   const focal = (cam.width / 2) / Math.tan(rad((cam.hfov ?? CAMERA_HFOV_DEG) / 2));
-  const depth = Math.max(dist * Math.cos(rad(off)), 0.3);
-  const horizon = cam.height / 2 + focal * Math.tan(rad(cam.pitch));
-  return {
-    sx: cam.width / 2 + focal * Math.tan(rad(off)),
-    top: horizon - focal * ((ZOMBIE_HEIGHT_M - EYE_M) / depth),
-    bottom: horizon + focal * (EYE_M / depth),
-    dist, off,
+  const ahead = Math.max(dist * Math.cos(rad(off)), 0.3), across = dist * Math.sin(rad(off));
+  const cp = Math.cos(rad(cam.pitch)), sp = Math.sin(rad(cam.pitch));
+  // A point `up` metres above the gun, in the tilted camera's frame.
+  const screen = (up: number) => {
+    const fwd = Math.max(ahead * cp + up * sp, NEAR_PLANE_M);
+    return { x: cam.width / 2 + focal * (across / fwd), y: cam.height / 2 - focal * ((up * cp - ahead * sp) / fwd) };
   };
+  const feet = screen(-EYE_M), head = screen(ZOMBIE_HEIGHT_M - EYE_M);
+  return { sx: feet.x, top: head.y, bottom: feet.y, dist, off };
 }
 
 // ------------------------------------------------------------------ aiming

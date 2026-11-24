@@ -3,13 +3,15 @@
  * step detection, and the projection/aiming maths.
  */
 import { test, expect } from '@playwright/test';
-import { fromLocal, toLocal, angleDiffDeg } from '../src/game/geo';
-import { OrientationTracker, pitchFromAttitude } from '../src/game/orientation';
+import { fromLocal, toLocal, angleDiffDeg, deg } from '../src/game/geo';
+import { OrientationTracker, pitchFromAttitude, rollFromUp, upFromAttitude } from '../src/game/orientation';
 import { PositionTracker, STEP_M } from '../src/game/position';
 import { StepDetector } from '../src/game/steps';
 import { PENDING_SHOT_S, expire, settle, shownAmmo, willFire } from '../src/game/ammo';
 import { EARSHOT_M, FULL_AT_M, HordeEar, RATE_MAX, RATE_MIN, hordeVoice, nearestDistance } from '../src/game/horde';
-import { DEATH_FX_S, ZombieBuffer, pickTargets, project, underCrosshair, type Camera } from '../src/game/zombies';
+import { lensMm, screenHfov, sensorHfov } from '../src/game/camera';
+import { WalkRecorder, walkLength } from '../src/game/walk';
+import { DEATH_FX_S, EYE_M, ZOMBIE_HEIGHT_M, ZombieBuffer, pickTargets, project, underCrosshair, type Camera } from '../src/game/zombies';
 import { Z_ATTACK, Z_CHASE } from '../src/net/types';
 import { FIGURE_ASPECT, ZOMBIE_KINDS, cellPlace, facing, frameAt, spriteBox, turnOf } from '../src/ui/spriteBox';
 import { ZOMBIE_ANGLES, ZOMBIE_SHEETS } from '../src/ui/zombieSheets';
@@ -182,6 +184,40 @@ test.describe('orientation', () => {
     expect(pitchFromAttitude(0, rad(75))).toBeCloseTo(-15, 5);
   });
 
+  test('roll: level in landscape either way round, positive with the right side raised', () => {
+    // Top edge to the player's left: the phone's +x axis points up.
+    expect(rollFromUp(1, 0)).toBeCloseTo(0, 5);
+    expect(rollFromUp(-1, 0)).toBeCloseTo(0, 5);                     // the other way round
+    // Raise the right-hand side 10°. Screen-right is -y one way round, +y the other.
+    expect(rollFromUp(Math.cos(rad(10)), -Math.sin(rad(10)))).toBeCloseTo(10, 5);
+    expect(rollFromUp(-Math.cos(rad(10)), Math.sin(rad(10)))).toBeCloseTo(10, 5);
+    expect(rollFromUp(Math.cos(rad(10)), Math.sin(rad(10)))).toBeCloseTo(-10, 5);
+    expect(rollFromUp(0, 1)).toBeNull();                              // portrait
+    expect(rollFromUp(0, 0)).toBeNull();
+    expect(rollFromUp(0.01, 0, 1)).toBeNull();                        // lying flat: no idea
+  });
+
+  test('roll from the web attitude agrees with the pitch from it', () => {
+    // Level landscape, as in the pitch test: gamma ±90°, beta 0.
+    const a = upFromAttitude(0, rad(-90)), b = upFromAttitude(0, rad(90));
+    expect(rollFromUp(a.x, a.y, a.z)).toBeCloseTo(0, 5);
+    expect(rollFromUp(b.x, b.y, b.z)).toBeCloseTo(0, 5);
+    expect(a.x).toBeGreaterThan(0.99);                                // +x up
+    // Tilting up does not read as roll.
+    const up = upFromAttitude(0, rad(-110));
+    expect(rollFromUp(up.x, up.y, up.z)).toBeCloseTo(0, 5);
+  });
+
+  test('roll is smoothed, capped, and drops to level when it cannot be told', () => {
+    const o = new OrientationTracker();
+    for (let t = 0; t < 2; t += 0.02) o.onUp(Math.cos(rad(8)), -Math.sin(rad(8)), 0, t);
+    expect(o.get().roll).toBeCloseTo(8, 1);
+    for (let t = 2; t < 4; t += 0.02) o.onUp(Math.cos(rad(60)), -Math.sin(rad(60)), 0, t);
+    expect(o.get().roll).toBeCloseTo(35, 1);
+    for (let t = 4; t < 6; t += 0.02) o.onUp(0.01, 0, 1, t);
+    expect(o.get().roll).toBeCloseTo(0, 1);
+  });
+
   test('compass alone drives the heading when there is no motion sensor', () => {
     const o = new OrientationTracker();
     expect(o.get().heading).toBeNull();
@@ -297,7 +333,24 @@ test.describe('zombies', () => {
   test('tilting the gun up slides the world down the screen', () => {
     const level = project(0, 10, cam())!, up = project(0, 10, cam({ pitch: 10 }))!;
     expect(up.bottom).toBeGreaterThan(level.bottom + 50);
-    expect(up.bottom - up.top).toBeCloseTo(level.bottom - level.top, 5);
+    expect(Math.abs((up.bottom - up.top) / (level.bottom - level.top) - 1)).toBeLessThan(0.05);   // barely changes size
+  });
+
+  test('the feet are on the floor however far the gun is tilted', () => {
+    // Pointing the gun at the floor `d` metres ahead puts that spot in the
+    // middle of the screen, so a zombie standing there has its feet there too.
+    for (const d of [1.5, 3, 6, 12, 30]) {
+      const atFeet = deg(Math.atan(-EYE_M / d));
+      const p = project(0, d, cam({ pitch: atFeet }))!;
+      expect(p.bottom, `${d} m`).toBeCloseTo(195, 3);
+      expect(p.sx).toBeCloseTo(422, 5);
+    }
+    // ...and the head, aimed up at it.
+    const head = project(0, 4, cam({ pitch: deg(Math.atan((ZOMBIE_HEIGHT_M - EYE_M) / 4)) }))!;
+    expect(head.top).toBeCloseTo(195, 3);
+    // Aiming well down at a near one, it still stands on the floor rather than above it.
+    const down = project(0, 2.5, cam({ pitch: -40 }))!;
+    expect(down.bottom).toBeGreaterThan(down.top);
   });
 
   test('the sprite box puts the head and feet exactly where the projection says', () => {
@@ -742,5 +795,61 @@ test.describe('the ammo readout runs ahead of the server', () => {
     expect(willFire({ ...ok, reloading: true })).toBe(false);
     expect(willFire({ ...ok, sinceLastShotS: 0.2 })).toBe(false);          // faster than the weapon fires
     expect(willFire({ ...ok, sinceLastShotS: 0.35 })).toBe(true);          // the server allows 15% early
+  });
+});
+
+test.describe('camera field of view', () => {
+  test('equivalent focal lengths give the fields of view the makers quote', () => {
+    expect(sensorHfov(26)).toBeCloseTo(67.3, 1);                      // iPhone main camera
+    expect(sensorHfov(24)).toBeCloseTo(71.6, 1);                      // 14 Pro onwards
+    expect(sensorHfov(28)).toBeCloseTo(63.4, 1);                      // SE, 8
+  });
+
+  test('the lens is looked up from the phone model', () => {
+    expect(lensMm('iPhone 15 Pro Max', 'ios')).toBe(24);
+    expect(lensMm('iPhone 15', 'ios')).toBe(26);
+    expect(lensMm('iPhone SE', 'ios')).toBe(28);
+    expect(lensMm('iPhone XS', 'ios')).toBe(26);
+    expect(lensMm('iPhone X', 'ios')).toBe(28);
+    expect(lensMm('Pixel 8', 'android')).toBe(25);
+    expect(lensMm('SM-S921B', 'android')).toBe(24);
+    expect(lensMm('Mystery Phone', 'android')).toBe(25);
+    expect(lensMm(null, 'web')).toBe(26);
+  });
+
+  test('a long screen shows the whole width; a squarer one crops the sides; zoom narrows it', () => {
+    expect(screenHfov(67, 844, 390)).toBeCloseTo(67, 5);              // 19.5:9 phone
+    expect(screenHfov(67, 390, 844)).toBeCloseTo(67, 5);              // either way round
+    // A 1.25:1 tablet shows 1.25 / 1.333 of the image's width.
+    expect(Math.tan(rad(screenHfov(67, 1000, 800) / 2))).toBeCloseTo(Math.tan(rad(33.5)) * (1.25 / (4 / 3)), 5);
+    expect(Math.tan(rad(screenHfov(67, 844, 390, 4 / 3, 2) / 2))).toBeCloseTo(Math.tan(rad(33.5)) / 2, 5);
+  });
+});
+
+test.describe('walking the area', () => {
+  test('points are kept a stride apart, and standing still adds nothing', () => {
+    const r = new WalkRecorder();
+    for (let i = 0; i < 20; i++) r.add(0, 0);
+    r.add(0.3, 0);
+    expect(r.result().paths).toEqual([]);                            // one point is not a line
+    for (let x = 1; x <= 10; x++) r.add(x, 0);
+    expect(r.result().paths[0].length).toBe(11);
+    expect(r.length).toBeCloseTo(10, 5);
+  });
+
+  test('a GPS jump starts a new stretch instead of a corridor through the wall', () => {
+    const r = new WalkRecorder();
+    for (let x = 0; x <= 10; x++) r.add(x, 0);
+    for (let x = 0; x <= 10; x++) r.add(x, 40);                       // 40 m away in one sample
+    expect(r.result().paths.length).toBe(2);
+    expect(r.length).toBeCloseTo(20, 5);                             // the jump is not walking
+    expect(r.enough).toBe(true);
+  });
+
+  test('the helicopter mark and the length of a sent walk', () => {
+    const r = new WalkRecorder();
+    r.markHelicopter(3.14159, 2.71828);
+    expect(r.result().helicopter).toEqual([3.14, 2.72]);
+    expect(walkLength([[[0, 0], [3, 4]], [[10, 10], [10, 12]]])).toBeCloseTo(7, 5);
   });
 });

@@ -281,7 +281,8 @@ export function MatchScreen() {
     <View style={styles.root} testID="game">
       {(perms.state?.camera ?? 'granted') === 'granted' ? (
         // The camera is the background, and nothing more: it reads no codes.
-        <CameraView style={StyleSheet.absoluteFill} facing="back" />
+        // 4:3 and no zoom: the shape and width the zombies are drawn for (see game/camera.ts).
+        <CameraView style={StyleSheet.absoluteFill} facing="back" ratio="4:3" zoom={0} />
       ) : null}
 
       <ZombieLayer width={width} height={height} cls={cls} aimRef={aimRef} onAimChange={setOnTarget} inset={Math.max(insets.left, insets.right)} />

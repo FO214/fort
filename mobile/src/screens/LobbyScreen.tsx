@@ -23,6 +23,7 @@ import { CONTENT_MAX } from '../ui/Screen';
 import { Sheet } from '../ui/Sheet';
 import { StatusChip } from '../ui/StatusChip';
 import { T } from '../ui/T';
+import { WalkPanel } from '../ui/WalkPanel';
 import { FieldMessage } from '../ui/TextField';
 
 /** GPS this tight or better is good enough to place a player in a room. */
@@ -151,8 +152,9 @@ export function LobbyScreen() {
     <View style={{ gap: space[2] }} testID="map-row">
       <T v="overline" c={colors.textSecondary}>Map</T>
       {isHost && s.maps.length > 1
-        ? <Segmented testID="map" value={s.map?.id ?? ''} onChange={(id) => net.setMap(id)} options={s.maps.map((m) => ({ value: m.id, label: m.name }))} />
-        : <T v="bodyStrong" testID="map-name">{s.map?.name ?? '···'}</T>}
+        ? <Segmented testID="map" value={s.settings?.map ?? s.map?.id ?? ''} onChange={(id) => net.setMap(id)} options={s.maps.map((m) => ({ value: m.id, label: m.name }))} />
+        : <T v="bodyStrong" testID="map-name">{s.settings?.map === 'walked' ? 'Walked area' : s.map?.name ?? '···'}</T>}
+      {s.settings?.map === 'walked' ? <WalkPanel isHost={isHost} map={s.map} mission={s.mode === 'mission'} /> : null}
     </View>
   );
 

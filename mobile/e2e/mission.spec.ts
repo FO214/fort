@@ -408,6 +408,57 @@ test('a real building: host picks the map, zombies keep to the floor plan, the m
   for (const p of [ada, bo]) await p.ctx.close();
 });
 
+test('free play: the host walks the area, and zombies keep to where they walked', async ({ browser }) => {
+  test.setTimeout(120_000);
+  const ada = await phone(browser, 'Ada');
+  const code = await createSquad(ada);
+  const bo = await phone(browser, 'Bo');
+  await joinSquad(bo, code);
+  await ada.page.getByTestId('mode-endless').click();
+  await ada.page.getByTestId('map-walked').click();
+  await expect(bo.page.getByTestId('map-name')).toHaveText('Walked area');
+  await expect(bo.page.getByTestId('walk-status')).toContainText('walking the area');
+
+  // Any shape works; an L has a corner, so it shows zombies going round it rather than
+  // across the unwalked inside of the bend. Too short, and Done waits.
+  await ada.page.getByTestId('walk-start').click();
+  await expect(ada.page.getByTestId('walk-done')).toBeDisabled();
+  const legs: [number, number][] = [];
+  for (let x = 0; x <= 20; x += 1.5) legs.push([x, 0]);
+  for (let y = 1.5; y <= 16.5; y += 1.5) legs.push([20, y]);
+  for (const [x, y] of legs) {
+    await ada.page.evaluate(([x, y]) => window.__loonieSim!.at(x, y, { snap: true }), [x, y]);
+    await ada.page.waitForTimeout(300);
+  }
+  await expect(ada.page.getByTestId('walk-done')).toBeEnabled();
+  await shot(ada.page, '28-lobby-walking');
+  await ada.page.getByTestId('walk-done').click();
+  await expect(bo.page.getByTestId('walk-status')).toContainText(/walked 3\d m/);
+  await expect(ada.page.getByTestId('walk-start')).toHaveText(/again/i);
+
+  await startMission([ada, bo]);
+  for (const p of [ada, bo]) await intoMission(p);
+  const map = await ada.page.evaluate(() => window.__loonieStore!.getState().map as { id: string; paths: [number, number][][] });
+  expect(map.id).toBe('walked');
+  expect(map.paths.length).toBe(1);
+  expect(map.paths[0].length).toBeLessThan(legs.length);          // simplified for drawing
+  await place(ada.page, 0, 0, 90);                                 // the start, looking down the corridor
+  await place(bo.page, 1.5, 0, 90);
+  await expect(ada.page.getByTestId('minimap')).toBeVisible();     // the walk is the floor plan
+
+  // Zombies come, and only ever stand where Ada walked.
+  const onWalk = ([x, y]: [number, number]) => (Math.abs(y) <= 1.3 && x >= -1.3 && x <= 21.3) || (Math.abs(x - 20) <= 1.3 && y >= -1.3 && y <= 17.8);
+  await expect.poll(async () => (await world(ada.page)).zombies.length, { timeout: 20_000 }).toBeGreaterThan(0);
+  for (let i = 0; i < 10; i++) {
+    for (const z of (await world(ada.page)).zombies) expect(onWalk([z.x, z.y]), `zombie ${z.id} at ${z.x},${z.y}`).toBe(true);
+    await ada.page.waitForTimeout(400);
+  }
+  await shot(ada.page, '29-walked-area-hud');
+  await abortMission(ada);
+  await expect(ada.page.getByTestId('walk-start')).toBeVisible();   // the walk survives a run
+  for (const p of [ada, bo]) await p.ctx.close();
+});
+
 test('endless mode: the host picks it, waves keep coming with no helicopter, and it ends when nobody is standing', async ({ browser }) => {
   test.setTimeout(180_000);
   const ada = await phone(browser, 'Ada');

@@ -10,7 +10,7 @@
  * Only what helps you move is drawn. Players keep their identity colour and
  * shape; zombies have a shape per type; the helicopter is the amber H.
  */
-import React from 'react';
+import React, { useMemo } from 'react';
 import { StyleSheet, View } from 'react-native';
 import Svg, { Circle, ClipPath, Defs, G, Line, Path, Polygon, Rect } from 'react-native-svg';
 import type { Identity } from '../game/identity';
@@ -41,7 +41,32 @@ interface Props {
 
 /** Does this map have anything to draw beyond dots? The open arena does not. */
 export const hasFloorPlan = (map: MapInfo | null | undefined): boolean =>
-  !!map && ((map.outline?.length ?? 0) >= 3 || (map.walls?.length ?? 0) > 0);
+  !!map && ((map.outline?.length ?? 0) >= 3 || (map.walls?.length ?? 0) > 0 || (map.paths?.length ?? 0) > 0);
+
+/** How wide the walked floor is drawn, in metres: the server opens 0.9 m either side of the walk. */
+const WALK_WIDTH_M = 1.8;
+
+/**
+ * The walked floor and the furniture, as SVG in map metres. Built once per
+ * map; every frame only the transform that places it changes, so a long walk
+ * costs the minimap nothing extra.
+ */
+function Floor({ map, mini }: { map: MapInfo; mini: boolean }) {
+  return useMemo(() => {
+    const line = (pts: [number, number][]) => pts.map(([x, y], i) => `${i ? 'L' : 'M'}${x} ${y}`).join(' ');
+    return (
+      <>
+        {(map.paths ?? []).map((p, i) => (
+          <Path key={`w${i}`} d={line(p)} fill="none" stroke={alpha(colors.textPrimary, mini ? 0.16 : 0.22)}
+            strokeWidth={WALK_WIDTH_M} strokeLinecap="round" strokeLinejoin="round" />
+        ))}
+        {(map.obstacles ?? []).map((p, i) => (
+          <Path key={`o${i}`} d={`${line(p)} Z`} fill={alpha(colors.textPrimary, 0.35)} />
+        ))}
+      </>
+    );
+  }, [map, mini]);
+}
 
 const EDGE = colors.camera.edge;
 
@@ -113,7 +138,17 @@ export function MapView({ map, me, myId, squad, zombies, identityOf, nameOf, wid
   const mini = mode === 'mini';
 
   // World metres → screen pixels.
+  // The same mapping as an SVG matrix, for drawing whole shapes in metres.
   let to: (x: number, y: number) => [number, number];
+  let matrix: string;
+  // The extent of a full map, worked out once per map (a walk can be thousands of points).
+  const extent = useMemo(() => {
+    const pts: [number, number][] = [...(map.outline ?? []), ...(map.walls ?? []).flatMap((w) => [[w[0], w[1]], [w[2], w[3]]] as [number, number][]),
+      ...(map.paths ?? []).flat(), [map.helicopter.x, map.helicopter.y], map.start];
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const [x, y] of pts) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y); }
+    return { minX, maxX, minY, maxY };
+  }, [map]);
   if (mini) {
     const s = Math.min(width, height) / 2 / rangeM;
     const h = (heading * Math.PI) / 180, cos = Math.cos(h), sin = Math.sin(h);
@@ -121,15 +156,14 @@ export function MapView({ map, me, myId, squad, zombies, identityOf, nameOf, wid
       const dx = x - me.x, dy = y - me.y;
       return [width / 2 + (dx * cos - dy * sin) * s, height / 2 - (dx * sin + dy * cos) * s];
     };
+    matrix = `matrix(${s * cos} ${-s * sin} ${-s * sin} ${-s * cos} ${width / 2 - s * (cos * me.x - sin * me.y)} ${height / 2 + s * (sin * me.x + cos * me.y)})`;
   } else {
-    const pts: [number, number][] = [...(map.outline ?? []), ...(map.walls ?? []).flatMap((w) => [[w[0], w[1]], [w[2], w[3]]] as [number, number][]),
-      [map.helicopter.x, map.helicopter.y], map.start];
-    const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
-    const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+    const { minX, maxX, minY, maxY } = extent;
     const pad = 22;
     const s = Math.min((width - pad * 2) / Math.max(maxX - minX, 1), (height - pad * 2) / Math.max(maxY - minY, 1));
     const ox = (width - (maxX - minX) * s) / 2, oy = (height - (maxY - minY) * s) / 2;
     to = (x, y) => [ox + (x - minX) * s, oy + (maxY - y) * s];
+    matrix = `matrix(${s} 0 0 ${-s} ${ox - minX * s} ${oy + maxY * s})`;
   }
 
   const outline = (map.outline ?? []).map(([x, y]) => to(x, y).join(',')).join(' ');
@@ -144,6 +178,7 @@ export function MapView({ map, me, myId, squad, zombies, identityOf, nameOf, wid
           <ClipPath id={`clip-${mode}`}><Rect x={0} y={0} width={width} height={height} /></ClipPath>
         </Defs>
         <G clipPath={`url(#clip-${mode})`}>
+          <G transform={matrix}><Floor map={map} mini={mini} /></G>
           {outline ? <Polygon points={outline} fill={mini ? alpha(colors.textPrimary, 0.1) : colors.surface} stroke={colors.borderStrong} strokeWidth={1} /> : null}
           {(map.walls ?? []).map((w, i) => {
             const [x1, y1] = to(w[0], w[1]), [x2, y2] = to(w[2], w[3]);

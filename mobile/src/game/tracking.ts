@@ -32,6 +32,8 @@ export interface Pose {
   /** Map heading the camera faces, or null before the compass reports. */
   heading: number | null;
   pitch: number;
+  /** Degrees the view is tilted sideways, positive with its right side raised. */
+  roll: number;
 }
 
 class Tracking {
@@ -73,6 +75,21 @@ class Tracking {
     if (f && t - f.t < FRESH_FIX_S) this.position.onGps(f.lat, f.lon, f.acc, t);
   }
 
+  /**
+   * Free play: start measuring from here, before there is a map. The
+   * newest fix becomes (0, 0), x east and y north; the walk is recorded in
+   * those metres and the server makes the map in them, so the mission's
+   * frame turns out the same one.
+   */
+  beginWalk(): [number, number] | null {
+    const f = this.lastFix;
+    if (!f) return null;
+    const t = clock();
+    this.position.setFrame({ origin: [f.lat, f.lon], rotation_deg: 0, start: [0, 0] }, t);
+    this.position.onGps(f.lat, f.lon, f.acc, t);
+    return [f.lat, f.lon];
+  }
+
   /** The gun just fired; do not mistake the jolt for a step. */
   noteShot(): void { this.steps.mute(clock() + SHOT_MUTE_S); }
 
@@ -87,7 +104,7 @@ class Tracking {
     return {
       x: p.x, y: p.y, acc: p.acc, hasFix: p.hasFix,
       heading: o.heading == null ? null : norm360(o.heading - this.position.rotation),
-      pitch: o.pitch,
+      pitch: o.pitch, roll: o.roll,
     };
   }
 
@@ -116,8 +133,14 @@ class Tracking {
       case 'step':
         this.stepForward(t);
         return;
+      case 'up':
+        this.orientation.onUp(e.x, e.y, e.z, t);
+        return;
       case 'pitch':
         this.orientation.setPitch(e.deg);
+        return;
+      case 'roll':
+        this.orientation.setRoll(e.deg);
         return;
     }
   }

@@ -11,7 +11,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { angleDiffDeg, bearingXY } from '../game/geo';
 import { tracking } from '../game/tracking';
-import { CAMERA_HFOV_DEG, EYE_M, ZOMBIE_HEIGHT_M, pickTargets, project, type Camera } from '../game/zombies';
+import { cameraHfov } from '../game/deviceCamera';
+import { EYE_M, ZOMBIE_HEIGHT_M, pickTargets, project, type Camera } from '../game/zombies';
 import { Z_ATTACK, Z_IDLE, type GunClass } from '../net/types';
 import { serverNow, useStore, zombies } from '../store';
 import { colors } from '../theme';
@@ -67,6 +68,8 @@ export function ZombieLayer({ width, height, cls, aimRef, onAimChange, inset = 0
 }) {
   const [items, setItems] = useState<Item[]>([]);
   const [threats, setThreats] = useState<EdgeThreat[]>([]);
+  // The camera's sideways tilt. The zombies are placed for a level camera and the lot turned by this.
+  const [roll, setRoll] = useState(0);
   // Walkers are always coming; anything else is loaded when the first one turns up.
   const [kinds, setKinds] = useState<ZombieKind[]>(['walker']);
   const dims = useRef({ width, height, cls, onAimChange });
@@ -84,15 +87,18 @@ export function ZombieLayer({ width, height, cls, aimRef, onAimChange, inset = 0
       if (ts - last < FRAME_MS) return;
       last = ts;
       const { width: w, height: h, cls: gun, onAimChange: notify } = dims.current;
+      const hfov = cameraHfov(w, h, useStore.getState().prefs.fovTrim);
       const pose = tracking.pose();
       const now = serverNow();
       const out: Item[] = [];
       const unseen: (EdgeThreat & { dist: number })[] = [];
       const turned = new Map<string, Facing>();
       let ids: number[] = [];
+      // Turned by the roll, the corners of the screen reach this much further out.
+      const spill = Math.abs(Math.sin((pose.roll * Math.PI) / 180)) * Math.max(w, h);
 
       if (pose.heading != null) {
-        const cam: Camera = { x: pose.x, y: pose.y, heading: pose.heading, pitch: pose.pitch, width: w, height: h, hfov: CAMERA_HFOV_DEG };
+        const cam: Camera = { x: pose.x, y: pose.y, heading: pose.heading, pitch: pose.pitch, width: w, height: h, hfov };
         const live = zombies.sample(now);
         if (gun) ids = pickTargets(live, cam, gun);
         const aimed = ids[0];
@@ -115,14 +121,14 @@ export function ZombieLayer({ width, height, cls, aimRef, onAimChange, inset = 0
           // Bigger types stand on the same floor and rise from it.
           const box = spriteBox(p.sx, bottom - (bottom - top) * grow, bottom);
           const reach = box.height * REACH;
-          if (box.left - reach > w || box.left + box.width + reach < 0 || box.top - reach > h || box.top + box.height < 0 || box.height < 8) return null;
+          if (box.left - reach > w + spill || box.left + box.width + reach < -spill || box.top - reach > h + spill || box.top + box.height < -spill || box.height < 8) return null;
           const size = SIZES.find((s) => s >= box.height) ?? SIZES[SIZES.length - 1];
           const scale = box.height / size;
           // Centre the fixed-size sprite on the box, then scale it to fit.
           return {
             p, size, scale,
             // Its body is on screen, not just a reaching arm.
-            inView: box.left <= w && box.left + box.width >= 0 && box.top <= h && box.top + box.height >= 0,
+            inView: box.left <= w + spill && box.left + box.width >= -spill && box.top <= h + spill && box.top + box.height >= -spill,
             left: box.left + box.width / 2 - (size * FIGURE_ASPECT) / 2,
             top: box.top + box.height / 2 - size / 2,
             far: Math.max(0.6, Math.min(1, 1.25 - p.dist / 60)),
@@ -136,7 +142,7 @@ export function ZombieLayer({ width, height, cls, aimRef, onAimChange, inset = 0
             if (dist <= THREAT_RANGE_M) {
               const off = angleDiffDeg(bearingXY(cam.x, cam.y, z.x, z.y), cam.heading);
               // Just out of view sits high on the edge; directly behind sits low.
-              const behind = Math.min(1, Math.max(0, (Math.abs(off) - CAMERA_HFOV_DEG / 2) / (180 - CAMERA_HFOV_DEG / 2)));
+              const behind = Math.min(1, Math.max(0, (Math.abs(off) - hfov / 2) / (180 - hfov / 2)));
               unseen.push({
                 key: `t${z.id}`, id: z.id, side: off >= 0 ? 'right' : 'left', y: h * (0.3 + 0.42 * behind),
                 near: dist <= THREAT_RANGE_M / 2.5, color: colors.zombies[kind], dist,
@@ -195,6 +201,7 @@ export function ZombieLayer({ width, height, cls, aimRef, onAimChange, inset = 0
       const onTarget = ids.length > 0;
       if (onTarget !== wasOnTarget) { wasOnTarget = onTarget; notify(onTarget); }
       setItems(out);
+      setRoll((prev) => (Math.abs(prev - pose.roll) < 0.2 ? prev : pose.roll));
       setThreats((prev) => (prev.length === 0 && shown.length === 0 ? prev : shown));
     };
     raf = requestAnimationFrame(loop);
@@ -204,6 +211,8 @@ export function ZombieLayer({ width, height, cls, aimRef, onAimChange, inset = 0
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none" testID="zombie-layer">
       <ZombiePreload kinds={kinds} />
+      {/* Turned about the screen centre, which is where the crosshair is, so aiming is unchanged. */}
+      <View style={[StyleSheet.absoluteFill, roll ? { transform: [{ rotate: `${roll}deg` }] } : null]}>
       {items.map((i) => (
         <View key={i.key} testID={i.key[0] === 'z' ? `zombie-${i.id}` : `corpse-${i.id}`}
           style={{
@@ -213,6 +222,7 @@ export function ZombieLayer({ width, height, cls, aimRef, onAimChange, inset = 0
           <ZombieSprite type={i.type} clip={i.clip} frame={i.frame} row={i.row} mirror={i.mirror} size={i.size} hp={i.hp} hurt={i.hurt} aimed={i.aimed} />
         </View>
       ))}
+      </View>
       {threats.map((t) => <EdgeMarker key={t.key} threat={t} inset={inset} />)}
     </View>
   );
