@@ -12,6 +12,7 @@
  */
 import React, { useMemo } from 'react';
 import { StyleSheet, View } from 'react-native';
+import { fitFull, mapExtent } from './mapFrame';
 import Svg, { Circle, ClipPath, Defs, G, Line, Path, Polygon, Rect } from 'react-native-svg';
 import type { Identity } from '../game/identity';
 import type { MapInfo, PlayerSnap, ZombieRow } from '../net/types';
@@ -142,13 +143,7 @@ export function MapView({ map, me, myId, squad, zombies, identityOf, nameOf, wid
   let to: (x: number, y: number) => [number, number];
   let matrix: string;
   // The extent of a full map, worked out once per map (a walk can be thousands of points).
-  const extent = useMemo(() => {
-    const pts: [number, number][] = [...(map.outline ?? []), ...(map.walls ?? []).flatMap((w) => [[w[0], w[1]], [w[2], w[3]]] as [number, number][]),
-      ...(map.paths ?? []).flat(), [map.helicopter.x, map.helicopter.y], map.start];
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    for (const [x, y] of pts) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y); }
-    return { minX, maxX, minY, maxY };
-  }, [map]);
+  const extent = useMemo(() => mapExtent(map), [map]);
   if (mini) {
     const s = Math.min(width, height) / 2 / rangeM;
     const h = (heading * Math.PI) / 180, cos = Math.cos(h), sin = Math.sin(h);
@@ -158,12 +153,9 @@ export function MapView({ map, me, myId, squad, zombies, identityOf, nameOf, wid
     };
     matrix = `matrix(${s * cos} ${-s * sin} ${-s * sin} ${-s * cos} ${width / 2 - s * (cos * me.x - sin * me.y)} ${height / 2 + s * (sin * me.x + cos * me.y)})`;
   } else {
-    const { minX, maxX, minY, maxY } = extent;
-    const pad = 22;
-    const s = Math.min((width - pad * 2) / Math.max(maxX - minX, 1), (height - pad * 2) / Math.max(maxY - minY, 1));
-    const ox = (width - (maxX - minX) * s) / 2, oy = (height - (maxY - minY) * s) / 2;
-    to = (x, y) => [ox + (x - minX) * s, oy + (maxY - y) * s];
-    matrix = `matrix(${s} 0 0 ${-s} ${ox - minX * s} ${oy + maxY * s})`;
+    const fit = fitFull(extent, width, height);
+    to = fit.to;
+    matrix = fit.matrix;
   }
 
   const outline = (map.outline ?? []).map(([x, y]) => to(x, y).join(',')).join(' ');

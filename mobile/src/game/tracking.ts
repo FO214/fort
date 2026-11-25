@@ -8,7 +8,7 @@ import { net } from '../net/client';
 import type { MapInfo } from '../net/types';
 import { isSim, simHandle, startSensors, type SensorEvent, type SimHandle, type Stop } from '../sensors';
 import { useStore } from '../store';
-import { fromLocal, norm360 } from './geo';
+import { bearingXY, fromLocal, norm360 } from './geo';
 import { OrientationTracker } from './orientation';
 import { PositionTracker } from './position';
 import { StepDetector } from './steps';
@@ -71,6 +71,7 @@ class Tracking {
   setFrame(map: MapInfo): void {
     const t = clock();
     this.position.setFrame({ origin: map.origin, rotation_deg: map.rotation_deg, start: map.start }, t);
+    this.orientation.clearTrim();
     const f = this.lastFix;
     if (f && t - f.t < FRESH_FIX_S) this.position.onGps(f.lat, f.lon, f.acc, t);
   }
@@ -88,6 +89,19 @@ class Tracking {
     this.position.setFrame({ origin: [f.lat, f.lon], rotation_deg: 0, start: [0, 0] }, t);
     this.position.onGps(f.lat, f.lon, f.acc, t);
     return [f.lat, f.lon];
+  }
+
+  /**
+   * The player marked on the map where they stand and, optionally, a spot
+   * the blaster is pointing at right now. Both are map metres. Corrects GPS
+   * and the compass from here on (see PositionTracker / OrientationTracker).
+   */
+  calibrate(at: [number, number], facing?: [number, number] | null): void {
+    this.position.calibrate(at[0], at[1], clock());
+    if (facing && Math.hypot(facing[0] - at[0], facing[1] - at[1]) >= 1) {
+      // Map heading to compass bearing: the map's +y points along `rotation`.
+      this.orientation.calibrate(bearingXY(at[0], at[1], facing[0], facing[1]) + this.position.rotation);
+    }
   }
 
   /** The gun just fired; do not mistake the jolt for a step. */

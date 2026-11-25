@@ -11,6 +11,7 @@ import { PENDING_SHOT_S, expire, settle, shownAmmo, willFire } from '../src/game
 import { EARSHOT_M, FULL_AT_M, HordeEar, RATE_MAX, RATE_MIN, hordeVoice, nearestDistance } from '../src/game/horde';
 import { lensMm, screenHfov, sensorHfov } from '../src/game/camera';
 import { WalkRecorder, walkLength } from '../src/game/walk';
+import { fitFull, mapExtent } from '../src/ui/mapFrame';
 import { DEATH_FX_S, EYE_M, ZOMBIE_HEIGHT_M, ZombieBuffer, pickTargets, project, underCrosshair, wallBetween, type Camera, type Wall } from '../src/game/zombies';
 import { Z_ATTACK, Z_CHASE } from '../src/net/types';
 import { FIGURE_ASPECT, ZOMBIE_KINDS, cellPlace, facing, frameAt, spriteBox, turnOf } from '../src/ui/spriteBox';
@@ -509,6 +510,75 @@ function over(rgba: string, base: string): string {
   const mix = (top: number, under: number) => Math.round(top * a + under * (1 - a));
   return '#' + [mix(r, (n >> 16) & 255), mix(g, (n >> 8) & 255), mix(b, n & 255)].map((v) => v.toString(16).padStart(2, '0')).join('');
 }
+
+test.describe('calibration', () => {
+  test('marking your spot moves you there and takes GPS\'s error off later fixes', () => {
+    const p = new PositionTracker();
+    p.setFrame(FRAME, 0);
+    // Indoors GPS puts the player 10 m east of where they really are, and keeps doing so.
+    p.onGps(...fix(10, 0), 5, 1);
+    p.calibrate(0, 0, 2);
+    let e = p.view(2);
+    expect([e.x, e.y]).toEqual([0, 0]);
+    expect(e.acc).toBeCloseTo(1.5, 5);
+    for (let t = 3; t <= 30; t++) p.onGps(...fix(10, 0), 5, t);
+    e = p.estimate(30);
+    // Without the correction it would have slid most of the way to 10 m. With it, only what has faded
+    // in 28 s comes back: the correction is still ~89% of 10 m, so the fixes now say ~1.1 m.
+    expect(Math.hypot(e.x, e.y)).toBeLessThan(1.2);
+    // The correction fades with time and with distance from where it was measured.
+    expect(p.correction(0, 0, 3)[0]).toBeCloseTo(-10 * Math.exp(-1 / 240), 3);
+    expect(p.correction(10, 0, 3)[0]).toBeCloseTo(-10 * Math.exp(-1 / 240) * Math.exp(-0.25), 3);
+    expect(Math.abs(p.correction(10, 0, 2 + 20 * 60)[0])).toBeLessThan(0.1);
+    expect(Math.abs(p.correction(200, 0, 3)[0])).toBeLessThan(0.1);
+  });
+
+  test('without a recent GPS fix, marking your spot only moves you', () => {
+    const p = new PositionTracker();
+    p.setFrame(FRAME, 0);
+    p.onGps(...fix(10, 0), 5, 1);
+    p.calibrate(0, 0, 60);                                     // that fix is a minute old
+    expect(p.correction(10, 0, 61)).toEqual([0, 0]);
+    expect(p.estimate(60).hasFix).toBe(true);
+  });
+
+  test('a new mission forgets the correction', () => {
+    const p = new PositionTracker();
+    p.setFrame(FRAME, 0);
+    p.onGps(...fix(10, 0), 5, 1);
+    p.calibrate(0, 0, 2);
+    p.setFrame(FRAME, 3);
+    expect(p.correction(10, 0, 3)).toEqual([0, 0]);
+  });
+
+  test('saying which way you face corrects the compass from then on', () => {
+    const o = new OrientationTracker();
+    o.onCompass(100, 0);                                      // the building's steel bends it 20° off
+    o.calibrate(80);
+    expect(o.get().heading).toBe(80);
+    expect(o.compassTrim).toBe(-20);
+    o.onCompass(100, 5);
+    expect(o.get().heading).toBeCloseTo(80, 5);
+    o.onCompass(190, 10);                                     // turned 90° to the right
+    expect(o.get().heading).toBeCloseTo(170, 5);
+    o.clearTrim();
+    o.onCompass(190, 15);
+    expect(o.get().heading).toBeCloseTo(190, 5);
+  });
+
+  test('a tap on the full map lands on the spot drawn there', () => {
+    const map = { outline: [[-10, -5], [30, -5], [30, 15], [-10, 15]] as [number, number][], walls: [], paths: [],
+      helicopter: { x: 0, y: 0, radius_m: 6, qr: '' }, start: [0, 0] as [number, number] };
+    const fit = fitFull(mapExtent(map), 600, 300);
+    for (const [x, y] of [[0, 0], [30, 15], [-10, -5], [12.5, 3.25]] as [number, number][]) {
+      const [px, py] = fit.to(x, y);
+      const [bx, by] = fit.from(px, py);
+      expect(bx).toBeCloseTo(x, 9); expect(by).toBeCloseTo(y, 9);
+    }
+    const [nx, ny] = fit.to(0, 15), [sx2, sy2] = fit.to(0, -5);
+    expect(nx).toBeCloseTo(sx2, 9); expect(ny).toBeLessThan(sy2);            // north is up
+  });
+});
 
 test.describe('walls', () => {
   const wall: Wall[] = [[-5, 5, 5, 5]];

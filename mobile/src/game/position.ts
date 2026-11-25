@@ -31,6 +31,14 @@ const START_VAR_M2 = 15 * 15;     // before the first fix we only know "near the
 // slowly for a GPS correction (you probably did not, the estimate just got better).
 const STEP_EASE_S = 0.15;
 const GPS_EASE_S = 1.5;
+// Calibration: the player says where they are. Indoors GPS tends to be wrong
+// the same way for a while (the same walls, the same satellites), so the
+// error measured then is taken off later fixes, less and less with time and
+// with distance from where it was measured.
+const CALIBRATED_ACC_M = 1.5;     // a tap on the map is about this good
+const OFFSET_FRESH_S = 10;        // a fix older than this says nothing about GPS's error now
+const OFFSET_KEEP_S = 240;        // the correction fades over minutes...
+const OFFSET_REACH_M = 40;        // ...and over tens of metres
 
 export interface Frame {
   /** Latitude/longitude of map (0, 0); null when the map has no anchor yet. */
@@ -59,6 +67,10 @@ export class PositionTracker {
   private gpsLagX = 0;
   private gpsLagY = 0;
   private viewT = 0;
+  /** The newest fix in map metres, before any correction. */
+  private rawFix: { x: number; y: number; t: number } | null = null;
+  /** GPS's error at the last calibration, and where and when it was measured. */
+  private offset: { dx: number; dy: number; x: number; y: number; t: number } | null = null;
 
   /** Call when a mission starts: where the map sits in the real world. */
   setFrame(frame: Frame, t: number): void {
@@ -72,6 +84,8 @@ export class PositionTracker {
     this.lastStepT = -Infinity;
     this.biasX = this.biasY = 0;
     this.displaced = false;
+    this.rawFix = null;
+    this.offset = null;
   }
 
   get origin(): [number, number] | null { return this.frame.origin; }
@@ -87,7 +101,11 @@ export class PositionTracker {
       this.frame.origin = fromLocal(-sx, -sy, lat, lon, this.frame.rotation_deg);
     }
     this.advance(t);
-    const [fx, fy] = toLocal(lat, lon, this.frame.origin[0], this.frame.origin[1], this.frame.rotation_deg);
+    let [fx, fy] = toLocal(lat, lon, this.frame.origin[0], this.frame.origin[1], this.frame.rotation_deg);
+    this.rawFix = { x: fx, y: fy, t };
+    // How far the player has gone from where they calibrated: the estimate, not the fix, which is the thing that is off.
+    const [cx, cy] = this.correction(this.x, this.y, t);
+    fx += cx; fy += cy;
     const r = Math.max(acc, MIN_FIX_ACC_M) ** 2;
 
     if (!this.hasFix || snap) {
@@ -122,6 +140,32 @@ export class PositionTracker {
     this.biasX = this.biasX * BIAS_KEEP + dx * (1 - k) * (1 - BIAS_KEEP);
     this.biasY = this.biasY * BIAS_KEEP + dy * (1 - k) * (1 - BIAS_KEEP);
     this.displaced = Math.hypot(this.biasX, this.biasY) > DISPLACED_FRACTION * Math.max(acc, MIN_FIX_ACC_M);
+  }
+
+  /**
+   * The player says they are standing at (x, y): believe it, and take GPS's
+   * error right now off the fixes that follow.
+   */
+  calibrate(x: number, y: number, t: number): void {
+    this.advance(t);
+    const f = this.rawFix && t - this.rawFix.t <= OFFSET_FRESH_S ? this.rawFix : null;
+    this.offset = f ? { dx: x - f.x, dy: y - f.y, x, y, t } : null;
+    this.x = x; this.y = y;
+    this.variance = CALIBRATED_ACC_M ** 2;
+    this.hasFix = true;
+    this.lastFixT = t;
+    this.biasX = this.biasY = 0;
+    this.displaced = false;
+    // Drawn there at once: the player is looking at the map, and asked for it.
+    this.stepLagX = this.stepLagY = this.gpsLagX = this.gpsLagY = 0;
+  }
+
+  /** The correction to add to a fix taken with the player at (x, y), from the last calibration. */
+  correction(x: number, y: number, t: number): [number, number] {
+    const o = this.offset;
+    if (!o) return [0, 0];
+    const k = Math.exp(-Math.max(0, t - o.t) / OFFSET_KEEP_S) * Math.exp(-Math.hypot(x - o.x, y - o.y) / OFFSET_REACH_M);
+    return [o.dx * k, o.dy * k];
   }
 
   /** One detected step along `mapHeading` (degrees, 0 = +y, clockwise). */

@@ -392,7 +392,7 @@ export function MatchScreen() {
 
       {showMap && plan ? (
         <FullMapOverlay map={plan} me={pose} myId={myId} squad={s.squad} zombies={zombies.latest()} identityOf={idOf} nameOf={nameOf}
-          onClose={() => setShowMap(false)} showHeli={!endless} />
+          onClose={() => setShowMap(false)} onCalibrate={(at, facing) => tracking.calibrate(at, facing)} showHeli={!endless} />
       ) : null}
 
       <ConnectionOverlay onLeave={leave} />

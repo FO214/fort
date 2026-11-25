@@ -80,15 +80,22 @@ export class OrientationTracker {
   private yawVote = -2;
   private turnedYaw = 0;
   private turnedCompass = 0;
+  /**
+   * Degrees added to every compass reading. Indoors, steel and wiring bend
+   * the compass, often by the same amount across a room; the player can say
+   * which way they really face (`calibrate`) and this keeps that correction.
+   */
+  private trim = 0;
 
   reset(): void {
+    this.trim = 0;
     this.heading = null; this.pitch = 0; this.roll = 0; this.lastAlpha = null; this.lastAttitudeT = -Infinity;
     this.lastCompass = null; this.yawVote = -2; this.turnedYaw = this.turnedCompass = 0;
   }
 
   /** Compass bearing the camera faces, in degrees. */
   onCompass(bearing: number, t: number): void {
-    const b = norm360(bearing);
+    const b = norm360(bearing + this.trim);
     if (this.lastCompass != null) this.turnedCompass += angleDiffDeg(b, this.lastCompass);
     const dt = Math.min(Math.max(t - this.lastCompassT, 0), 1);
     this.lastCompass = b;
@@ -127,6 +134,24 @@ export class OrientationTracker {
     const want = r == null ? 0 : Math.max(-MAX_ROLL_DEG, Math.min(MAX_ROLL_DEG, r));
     this.roll += (want - this.roll) * (dt > 1 ? 1 : 1 - Math.exp(-dt / ROLL_TAU_S));
   }
+
+  /**
+   * The player says the camera faces `bearing` (compass degrees) right now:
+   * face it at once, and correct the compass by however far off it was.
+   */
+  calibrate(bearing: number): void {
+    const want = norm360(bearing);
+    // Measured against the compass itself, not the smoothed heading, which may still be catching up.
+    const raw = this.lastCompass != null ? norm360(this.lastCompass - this.trim) : null;
+    if (raw != null) this.trim = angleDiffDeg(want, raw);
+    this.lastCompass = want;
+    this.heading = want;
+  }
+
+  get compassTrim(): number { return this.trim; }
+
+  /** Forget a calibration (a new mission). */
+  clearTrim(): void { this.trim = 0; }
 
   /** Tests and the simulator set roll directly. */
   setRoll(roll: number): void { this.roll = roll; }
