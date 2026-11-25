@@ -11,7 +11,7 @@ import { PENDING_SHOT_S, expire, settle, shownAmmo, willFire } from '../src/game
 import { EARSHOT_M, FULL_AT_M, HordeEar, RATE_MAX, RATE_MIN, hordeVoice, nearestDistance } from '../src/game/horde';
 import { lensMm, screenHfov, sensorHfov } from '../src/game/camera';
 import { WalkRecorder, walkLength } from '../src/game/walk';
-import { DEATH_FX_S, EYE_M, ZOMBIE_HEIGHT_M, ZombieBuffer, pickTargets, project, underCrosshair, type Camera } from '../src/game/zombies';
+import { DEATH_FX_S, EYE_M, ZOMBIE_HEIGHT_M, ZombieBuffer, pickTargets, project, underCrosshair, wallBetween, type Camera, type Wall } from '../src/game/zombies';
 import { Z_ATTACK, Z_CHASE } from '../src/net/types';
 import { FIGURE_ASPECT, ZOMBIE_KINDS, cellPlace, facing, frameAt, spriteBox, turnOf } from '../src/ui/spriteBox';
 import { ZOMBIE_ANGLES, ZOMBIE_SHEETS } from '../src/ui/zombieSheets';
@@ -509,6 +509,20 @@ function over(rgba: string, base: string): string {
   const mix = (top: number, under: number) => Math.round(top * a + under * (1 - a));
   return '#' + [mix(r, (n >> 16) & 255), mix(g, (n >> 8) & 255), mix(b, n & 255)].map((v) => v.toString(16).padStart(2, '0')).join('');
 }
+
+test.describe('walls', () => {
+  const wall: Wall[] = [[-5, 5, 5, 5]];
+  test('a wall between hides a zombie from sight and from the gun', () => {
+    expect(wallBetween(0, 0, 0, 10, wall)).toBe(true);
+    expect(wallBetween(0, 0, 0, 4, wall)).toBe(false);          // this side of it
+    expect(wallBetween(0, 0, 12, 10, wall)).toBe(false);        // passes beyond its end
+    expect(wallBetween(0, 0, 0, 10, [])).toBe(false);
+    const zs = [{ id: 1, x: 0, y: 10 }, { id: 2, x: 0, y: 4 }];
+    const aim = { x: 0, y: 0, heading: 0, pitch: 0 }, gun = { spread_deg: 2, range_m: 35 };
+    expect(pickTargets(zs, aim, gun, wall)).toEqual([2]);
+    expect(pickTargets([zs[0]], aim, gun, wall)).toEqual([]);
+  });
+});
 
 test.describe('contrast', () => {
   const AA = 4.5, LARGE = 3;

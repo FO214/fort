@@ -8,7 +8,7 @@ import { useReducedMotion } from './motion';
 import { StatusChip } from './StatusChip';
 
 /** Misses worth explaining. A plain miss (nothing under the crosshair) says nothing. */
-const REASON: Record<string, string> = { range: 'Out of range', reloading: 'Reloading', empty: 'Magazine empty' };
+const REASON: Record<string, string> = { range: 'Out of range', wall: 'Behind a wall', reloading: 'Reloading', empty: 'Magazine empty' };
 
 const SIZE = 52;
 const TICKS = [[10, 10, 20, 20], [42, 10, 32, 20], [10, 42, 20, 32], [42, 42, 32, 32]];

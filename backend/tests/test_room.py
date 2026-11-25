@@ -1,4 +1,5 @@
 """Room rules with a fake clock: no sockets, no sleeping."""
+import dataclasses
 import math
 import random
 
@@ -136,6 +137,17 @@ def test_claimed_hit_must_match_where_the_gun_points():
     assert ev[0]["reason"] == "off_target" and z.hp == WALKER.hp
     # A few degrees off is honest disagreement (the phone is a snapshot ahead).
     assert r.fire(a.id, 2, [z.id], 12.0, T0 + 2)[0]["reason"] == "hit"
+
+
+def test_no_shooting_through_walls():
+    r, a, _ = make_room()
+    r.start(a.id, T0)
+    r.map = dataclasses.replace(r.map, walls=[(-5.0, 5.0, 5.0, 5.0)])   # a copy: the cached map stays wall-free
+    place(r, a, 0, 0)
+    z = r.world.spawn(WALKER, 0, 10)                    # dead ahead, the far side of the wall
+    ev = r.fire(a.id, 1, [z.id], 0.0, T0 + 1)
+    assert kinds(ev) == ["fired"] and ev[0]["reason"] == "wall"
+    assert r.world.zombies[z.id].hp == WALKER.hp
 
 
 def test_out_of_range():

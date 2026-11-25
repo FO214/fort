@@ -12,7 +12,7 @@ import { StyleSheet, View } from 'react-native';
 import { angleDiffDeg, bearingXY } from '../game/geo';
 import { tracking } from '../game/tracking';
 import { cameraHfov } from '../game/deviceCamera';
-import { EYE_M, ZOMBIE_HEIGHT_M, pickTargets, project, type Camera } from '../game/zombies';
+import { EYE_M, ZOMBIE_HEIGHT_M, pickTargets, project, wallBetween, type Camera } from '../game/zombies';
 import { Z_ATTACK, Z_IDLE, type GunClass } from '../net/types';
 import { serverNow, useStore, zombies } from '../store';
 import { colors } from '../theme';
@@ -99,8 +99,10 @@ export function ZombieLayer({ width, height, cls, aimRef, onAimChange, inset = 0
 
       if (pose.heading != null) {
         const cam: Camera = { x: pose.x, y: pose.y, heading: pose.heading, pitch: pose.pitch, width: w, height: h, hfov };
+        // Walls hide what is behind them, from sight and from the gun alike.
+        const walls = useStore.getState().map?.walls;
         const live = zombies.sample(now);
-        if (gun) ids = pickTargets(live, cam, gun);
+        if (gun) ids = pickTargets(live, cam, gun, walls);
         const aimed = ids[0];
         const me = useStore.getState().session?.playerId;
         // Which of the drawn angles this phone sees it from.
@@ -110,6 +112,7 @@ export function ZombieLayer({ width, height, cls, aimRef, onAimChange, inset = 0
           return f;
         };
         const place = (x: number, y: number, grow = 1) => {
+          if (wallBetween(cam.x, cam.y, x, y, walls)) return null;
           const p = project(x, y, cam);
           if (!p || p.dist > MAX_DRAW_M) return null;
           // Nearer than arm's length it stops growing: drawn as if it stood a step back, about eye level.

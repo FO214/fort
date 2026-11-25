@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from .geo import angle_diff_deg, bearing_xy, dist_xy
+from .nav import segments_cross
 from .mapdata import WALK_ID, MapData, Point, load_map
 from .mission import REVIVE_HEALTH, Mission, Tuning
 from .models import CLASSES, DEFAULT_CLASS, Settings
@@ -317,6 +318,9 @@ class Room:
                     + math.degrees(math.atan2(ZOMBIE_HALF_WIDTH_M + POS_SLACK_M, max(dist, 0.5))))
             if off > gate:
                 reason = "off_target"
+                continue
+            if any(segments_cross((p.x, p.y), (z.x, z.y), (w[0], w[1]), (w[2], w[3])) for w in self.map.walls):
+                reason = "wall"                # the phone does not draw it either
                 continue
             zx, zy = z.x, z.y
             _, killed = self.world.damage(zid, w.damage)

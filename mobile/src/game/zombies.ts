@@ -191,6 +191,31 @@ export function project(x: number, y: number, cam: Camera): Placed | null {
   return { sx: feet.x, top: head.y, bottom: feet.y, dist, off };
 }
 
+// ------------------------------------------------------------------ walls
+
+/** A wall segment in map metres, `[x1, y1, x2, y2]`, as the map sends it. */
+export type Wall = [number, number, number, number];
+
+const orient = (ax: number, ay: number, bx: number, by: number, cx: number, cy: number) =>
+  (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+
+/**
+ * Is there a wall between (ax, ay) and (bx, by)? The same test as the
+ * server's `segments_cross` (backend/app/nav.py): only a proper crossing
+ * counts, so grazing the end of a wall, or running along one, does not.
+ */
+export function wallBetween(ax: number, ay: number, bx: number, by: number, walls: readonly Wall[] | null | undefined): boolean {
+  if (!walls?.length) return false;
+  const loX = Math.min(ax, bx), hiX = Math.max(ax, bx), loY = Math.min(ay, by), hiY = Math.max(ay, by);
+  for (const [x1, y1, x2, y2] of walls) {
+    if ((x1 < loX && x2 < loX) || (x1 > hiX && x2 > hiX) || (y1 < loY && y2 < loY) || (y1 > hiY && y2 > hiY)) continue;
+    const d1 = orient(x1, y1, x2, y2, ax, ay), d2 = orient(x1, y1, x2, y2, bx, by);
+    const d3 = orient(ax, ay, bx, by, x1, y1), d4 = orient(ax, ay, bx, by, x2, y2);
+    if (d1 !== 0 && d2 !== 0 && d3 !== 0 && d4 !== 0 && (d1 > 0) !== (d2 > 0) && (d3 > 0) !== (d4 > 0)) return true;
+  }
+  return false;
+}
+
 // ------------------------------------------------------------------ aiming
 
 export interface Aim { x: number; y: number; heading: number; pitch: number }
@@ -211,10 +236,13 @@ export function underCrosshair(z: { x: number; y: number }, aim: Aim, spreadDeg:
 /**
  * The zombies a trigger pull would hit, nearest first. The nearest one blocks
  * the rest; the server applies that rule, the list just gives it the order.
+ * One behind a wall cannot be hit (nor is it drawn).
  */
-export function pickTargets(zombies: { id: number; x: number; y: number }[], aim: Aim, cls: Pick<GunClass, 'spread_deg' | 'range_m'>): number[] {
+export function pickTargets(zombies: { id: number; x: number; y: number }[], aim: Aim, cls: Pick<GunClass, 'spread_deg' | 'range_m'>,
+  walls?: readonly Wall[] | null): number[] {
   const hits: { id: number; dist: number }[] = [];
   for (const z of zombies) {
+    if (wallBetween(aim.x, aim.y, z.x, z.y, walls)) continue;
     const h = underCrosshair(z, aim, cls.spread_deg, cls.range_m);
     if (h) hits.push({ id: z.id, dist: h.dist });
   }
