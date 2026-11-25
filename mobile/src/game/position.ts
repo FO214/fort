@@ -124,22 +124,6 @@ export class PositionTracker {
     this.displaced = Math.hypot(this.biasX, this.biasY) > DISPLACED_FRACTION * Math.max(acc, MIN_FIX_ACC_M);
   }
 
-  /**
-   * Take over a position measured some better way (AR tracking), so that if
-   * that is lost, GPS and steps carry on from here instead of from where they
-   * had wandered to.
-   */
-  adopt(x: number, y: number, acc: number, t: number): void {
-    this.advance(t);
-    this.x = x; this.y = y;
-    this.variance = Math.max(acc, 0.1) ** 2;
-    this.hasFix = true;
-    this.lastFixT = t;
-    this.biasX = this.biasY = 0;
-    this.displaced = false;
-    this.stepLagX = this.stepLagY = this.gpsLagX = this.gpsLagY = 0;
-  }
-
   /** One detected step along `mapHeading` (degrees, 0 = +y, clockwise). */
   onStep(mapHeading: number, t: number): void {
     this.advance(t);

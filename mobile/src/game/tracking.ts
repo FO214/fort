@@ -2,17 +2,12 @@
  * Turns raw sensor events into "where am I and where is the gun pointing".
  * One instance for the whole app; the lobby and the game both hold it open,
  * so GPS is already warm when the mission starts.
- *
- * Two ways to know: AR tracking, once the phone has seen one of the map's
- * markers (arPose.ts), and otherwise GPS, steps and the compass. Both are fed
- * all the time; `pose()` gives the AR answer while it has one.
  */
 import { useEffect } from 'react';
 import { net } from '../net/client';
 import type { MapInfo } from '../net/types';
 import { isSim, simHandle, startSensors, type SensorEvent, type SimHandle, type Stop } from '../sensors';
 import { useStore } from '../store';
-import { ArTracker, cameraMatrix, markerMatrix, toMap } from './arPose';
 import { fromLocal, norm360 } from './geo';
 import { OrientationTracker } from './orientation';
 import { PositionTracker } from './position';
@@ -21,7 +16,6 @@ import { StepDetector } from './steps';
 const SEND_EVERY_MS = 125;        // 8 Hz to the server
 const FRESH_FIX_S = 15;           // a lobby fix this recent seeds the mission position
 const SHOT_MUTE_S = 0.25;         // recoil is not a footstep
-const ADOPT_EVERY_S = 0.25;       // how often GPS tracking is moved to where AR says we are
 /** Further than this from the map and GPS is not describing a player in this building. */
 export const OFF_MAP_M = 2000;
 
@@ -46,8 +40,6 @@ class Tracking {
   readonly position = new PositionTracker();
   readonly orientation = new OrientationTracker();
   readonly steps = new StepDetector();
-  readonly ar = new ArTracker();
-  private adoptedT = -Infinity;
   /** Newest raw GPS fix, kept so the host can anchor the map with it. */
   lastFix: { lat: number; lon: number; acc: number; t: number } | null = null;
   private stop: Stop | null = null;
@@ -78,7 +70,6 @@ class Tracking {
   /** A mission started: this is where the map sits in the real world. */
   setFrame(map: MapInfo): void {
     const t = clock();
-    this.ar.setAnchors(map.anchors ?? []);
     this.position.setFrame({ origin: map.origin, rotation_deg: map.rotation_deg, start: map.start }, t);
     const f = this.lastFix;
     if (f && t - f.t < FRESH_FIX_S) this.position.onGps(f.lat, f.lon, f.acc, t);
@@ -108,10 +99,7 @@ class Tracking {
    * and reported to the server, so all three always agree.
    */
   pose(): Pose {
-    const t = clock();
-    const ar = this.ar.pose(t);
-    if (ar) return { x: ar.x, y: ar.y, acc: ar.acc, hasFix: true, heading: ar.heading, pitch: ar.pitch, roll: ar.roll };
-    const p = this.position.view(t);
+    const p = this.position.view(clock());
     const o = this.orientation.get();
     return {
       x: p.x, y: p.y, acc: p.acc, hasFix: p.hasFix,
@@ -154,18 +142,6 @@ class Tracking {
       case 'roll':
         this.orientation.setRoll(e.deg);
         return;
-      case 'arFrame': {
-        this.ar.onFrame(e.m, e.state, t);
-        const p = t - this.adoptedT >= ADOPT_EVERY_S ? this.ar.pose(t) : null;
-        if (p) { this.position.adopt(p.x, p.y, p.acc, t); this.adoptedT = t; }
-        return;
-      }
-      case 'arMarker':
-        this.ar.onMarker(e.id, e.m, t);
-        return;
-      case 'arReset':
-        this.ar.onReset();
-        return;
     }
   }
 
@@ -185,10 +161,6 @@ if (typeof window !== 'undefined') (window as unknown as { __loonieTracking?: un
  */
 export function useTracking(sending: boolean, enabled = true): void {
   useEffect(() => (enabled ? tracking.acquire() : undefined), [enabled]);
-
-  // The map's markers, as soon as a map is picked: a marker seen in the lobby already counts.
-  const map = useStore((s) => s.map);
-  useEffect(() => tracking.ar.setAnchors(map?.anchors ?? []), [map]);
 
   // Each `started` message (a new mission, or a reconnect) re-anchors the map.
   const missionSeq = useStore((s) => s.missionSeq);
@@ -216,16 +188,7 @@ export interface SimMapHandle extends SimHandle {
   at: (x: number, y: number, opts?: { acc?: number; snap?: boolean }) => void;
   /** Point the camera along a map heading. */
   aim: (mapHeading: number, pitch?: number) => void;
-  /**
-   * AR tracking puts the camera at a map position. The pretend AR session is
-   * turned and shifted from the map (`SIM_AR`); the first call sees the map's
-   * first marker, which is what lines the two up.
-   */
-  arPose: (x: number, y: number, mapHeading: number, pitch?: number) => void;
 }
-
-/** How the simulator's pretend AR frame sits on the map: an arbitrary turn and shift. */
-export const SIM_AR = { theta: 37, tx: 4, ty: -6 };
 
 if (isSim()) {
   const sim = simHandle() as SimMapHandle;
@@ -236,19 +199,4 @@ if (isSim()) {
     sim.fix(lat, lon, opts.acc ?? 3, opts.snap ?? false);
   };
   sim.aim = (mapHeading, pitch) => sim.face(mapHeading + tracking.position.rotation, pitch);
-  // Map to pretend-AR: undo SIM_AR's shift, then its turn.
-  const toAr = (x: number, y: number): [number, number] => {
-    const back = { theta: -SIM_AR.theta, tx: 0, ty: 0 };
-    return toMap(back, x - SIM_AR.tx, y - SIM_AR.ty);
-  };
-  sim.arPose = (x, y, mapHeading, pitch = 0) => {
-    if (!tracking.ar.anchored) {
-      const a = useStore.getState().map?.anchors?.[0];
-      if (!a) throw new Error('this map has no AR markers');
-      const [u, v] = toAr(a.x, a.y);
-      sim.arMarker(a.id, markerMatrix(u, v, a.facing - SIM_AR.theta));
-    }
-    const [u, v] = toAr(x, y);
-    sim.arFrame(cameraMatrix(u, v, mapHeading - SIM_AR.theta, pitch));
-  };
 }

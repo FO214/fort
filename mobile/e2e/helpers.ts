@@ -32,7 +32,7 @@ export const LANDSCAPE = { width: 844, height: 390 };
 export interface Phone { ctx: BrowserContext; page: Page; name: string }
 
 type ZRow = [number, number, number, number, number, number, string | null];
-interface Pose { x: number; y: number; heading: number | null; pitch: number; hasFix: boolean; acc: number }
+interface Pose { x: number; y: number; heading: number | null; pitch: number; hasFix: boolean }
 declare global {
   interface Window {
     __loonieSim?: {
@@ -40,7 +40,6 @@ declare global {
       aim: (heading: number, pitch?: number) => void;
       step: (n?: number) => void;
       fix: (lat: number, lon: number, acc?: number, snap?: boolean) => void;
-      arPose: (x: number, y: number, heading: number, pitch?: number) => void;
     };
     __loonieStore?: { getState: () => Record<string, any> };
     __loonieZombies?: { latest: () => ZRow[] };

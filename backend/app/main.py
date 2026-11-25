@@ -6,20 +6,18 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hmac
-import json
 import logging
-import os
 import time
 from typing import Any, Optional
 
-from fastapi import FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import TypeAdapter, ValidationError
 
 from . import discovery
 from . import models as m
 from .devices import Devices
-from .mapdata import available_maps, load_map, map_choices, save_map
+from .mapdata import available_maps, load_map, map_choices
 from .mission import Tuning
 from .room import GameError, Player, Room, RoomManager
 
@@ -171,33 +169,6 @@ async def classes() -> dict[str, Any]:
 @app.get("/maps")
 async def maps() -> dict[str, Any]:
     return {mid: load_map(mid).public() for mid in available_maps()}
-
-
-MAX_MAP_BYTES = 2 * 1024 * 1024
-
-
-@app.post("/maps/{map_id}")
-async def upload_map(map_id: str, request: Request,
-                     x_upload_key: Optional[str] = Header(default=None)) -> dict[str, Any]:
-    """Add or replace a map (a LiDAR scan, say). Only with the server's upload
-    key: there are no accounts, so without one anybody could replace a map
-    mid-game. With no key set, uploading is off."""
-    key = os.environ.get("LOONIE_UPLOAD_KEY", "")
-    if not key or not x_upload_key or not hmac.compare_digest(x_upload_key.encode(), key.encode()):
-        raise HTTPException(403, "Uploading maps needs the server's upload key")
-    body = await request.body()
-    if len(body) > MAX_MAP_BYTES:
-        raise HTTPException(413, "That map is too big")
-    try:
-        data = json.loads(body)
-    except ValueError:
-        raise HTTPException(400, "Not JSON") from None
-    try:
-        return save_map(map_id, data).public()
-    except PermissionError as e:
-        raise HTTPException(409, str(e)) from None
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from None
 
 
 @app.websocket("/ws")

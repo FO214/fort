@@ -3,13 +3,6 @@ services:
     build: ..
     restart: unless-stopped
     expose: ["8000"]
-    environment:
-      # Uploaded maps (LiDAR scans) live on a volume, so a rebuild keeps them.
-      - LOONIE_MAPS_DIR=/srv/uploaded_maps
-      # Uploading is off unless this is set in .env (see ec2-user-data.sh).
-      - LOONIE_UPLOAD_KEY=${LOONIE_UPLOAD_KEY:-}
-    volumes:
-      - maps_data:/srv/uploaded_maps
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
@@ -21,4 +14,3 @@ services:
       - caddy_data:/data
 volumes:
   caddy_data:
-  maps_data:

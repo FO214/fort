@@ -71,10 +71,6 @@
 <rect x="458.6" y="721.7" width="18" height="18" rx="4" fill="#facc15" stroke="#111111"/>
 <text x="467.6" y="735.2" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="13" font-weight="800">H</text>
 <text x="481.6" y="718.7" font-family="Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#854d0e">HELICOPTER (tape the QR sign here)</text>
-<rect x="239.1" y="242.6" width="12" height="12" fill="#7c3aed" stroke="#ffffff"/>
-<text x="255.1" y="252.6" font-family="Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#7c3aed">AR marker "cafe"</text>
-<rect x="461.6" y="850.5" width="12" height="12" fill="#7c3aed" stroke="#ffffff"/>
-<text x="477.6" y="860.5" font-family="Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#7c3aed">AR marker "atrium"</text>
 <path d="M 20 1005.2 L 24.5 1014.2 L 15.5 1014.2 Z" fill="#dc2626"/><text x="32" y="1014.2" font-family="Helvetica, Arial, sans-serif" font-size="11">zombie spawn point</text>
 <line x1="14" y1="1028.2" x2="27" y2="1028.2" stroke="#2563eb" stroke-width="1.5" stroke-dasharray="5 4"/><text x="32" y="1032.2" font-family="Helvetica, Arial, sans-serif" font-size="11">route zombies follow</text>
 <line x1="14" y1="1046.2" x2="27" y2="1046.2" stroke="#111111" stroke-width="2.5"/><text x="32" y="1050.2" font-family="Helvetica, Arial, sans-serif" font-size="11">wall (zombies cannot pass)</text>

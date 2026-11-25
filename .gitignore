@@ -3,7 +3,6 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .venv/
-backend/uploaded_maps/
 backend/deploy/.env
 
 # node / expo
@@ -14,8 +13,6 @@ web-build/
 *.tsbuildinfo
 mobile/e2e/output/
 mobile/e2e/report/
-mobile/test-results/
-mobile/scripts/output/
 
 # misc
 .DS_Store
