@@ -11,6 +11,7 @@ import { PENDING_SHOT_S, expire, settle, shownAmmo, willFire } from '../src/game
 import { EARSHOT_M, FULL_AT_M, HordeEar, RATE_MAX, RATE_MIN, hordeVoice, nearestDistance } from '../src/game/horde';
 import { lensMm, screenHfov, sensorHfov } from '../src/game/camera';
 import { WalkRecorder, walkLength } from '../src/game/walk';
+import { AR_STALE_S, ArTracker, alignFromMarker, cameraFromMatrix, cameraMatrix, markerFromMatrix, markerMatrix, toMap } from '../src/game/arPose';
 import { DEATH_FX_S, EYE_M, ZOMBIE_HEIGHT_M, ZombieBuffer, pickTargets, project, underCrosshair, wallBetween, type Camera, type Wall } from '../src/game/zombies';
 import { Z_ATTACK, Z_CHASE } from '../src/net/types';
 import { FIGURE_ASPECT, ZOMBIE_KINDS, cellPlace, facing, frameAt, spriteBox, turnOf } from '../src/ui/spriteBox';
@@ -509,6 +510,145 @@ function over(rgba: string, base: string): string {
   const mix = (top: number, under: number) => Math.round(top * a + under * (1 - a));
   return '#' + [mix(r, (n >> 16) & 255), mix(g, (n >> 8) & 255), mix(b, n & 255)].map((v) => v.toString(16).padStart(2, '0')).join('');
 }
+
+test.describe('AR tracking', () => {
+  const near = (a: number, b: number, eps = 1e-6) => expect(Math.abs(a - b)).toBeLessThan(eps);
+  const nearDeg = (a: number, b: number, eps = 1e-6) => expect(Math.abs(angleDiffDeg(a, b))).toBeLessThan(eps);
+  const IDENTITY = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+
+  test('a camera at the session start looks along +v, level', () => {
+    const c = cameraFromMatrix(IDENTITY);
+    for (const k of ['u', 'v', 'heading', 'pitch', 'roll'] as const) near(c[k], 0);
+  });
+
+  test('camera matrices read back, held either way round', () => {
+    for (const flip of [false, true]) {
+      for (const h of [0, 37, 90, 200, 359]) {
+        for (const pitch of [-25, 0, 15]) {
+          for (const roll of [-12, 0, 9]) {
+            const c = cameraFromMatrix(cameraMatrix(2, -3, h, pitch, roll, { flip }));
+            near(c.u, 2); near(c.v, -3); nearDeg(c.heading, h); near(c.pitch, pitch); near(c.roll, roll);
+          }
+        }
+      }
+    }
+  });
+
+  test('roll is positive with the right side raised, and capped like the motion sensor', () => {
+    const m = cameraMatrix(0, 0, 0, 0, 10);
+    expect(m[1]).toBeGreaterThan(0);                       // the camera's x (screen right) points up a little
+    expect(cameraFromMatrix(cameraMatrix(0, 0, 0, 0, 60)).roll).toBe(35);
+  });
+
+  test('pointing at the floor keeps the last heading', () => {
+    const c = cameraFromMatrix(cameraMatrix(0, 0, 120, -89.9), 33);
+    nearDeg(c.heading, 33);
+    expect(c.roll).toBe(0);
+  });
+
+  test('a marker on a wall faces out of it; one flat on the floor by its top edge', () => {
+    const w = markerFromMatrix(markerMatrix(1, 2, 250));
+    near(w.u, 1); near(w.v, 2); nearDeg(w.facing, 250);
+    // Flat: face up (+y), top edge along heading 70, so +z (the bottom edge) points the other way.
+    const top = [Math.sin(rad(70)), 0, -Math.cos(rad(70))];
+    const right = [Math.cos(rad(70)), 0, Math.sin(rad(70))];
+    const flat = [...right, 0, 0, 1, 0, 0, -top[0], 0, -top[2], 0, 5, 0, -6, 1];
+    const f = markerFromMatrix(flat);
+    near(f.u, 5); near(f.v, 6); nearDeg(f.facing, 70);
+  });
+
+  test('a sighting lines the AR floor up with the map', () => {
+    // The session started somewhere else, turned 70° from the map.
+    const anchor = { id: 'n', x: 3, y: 10, facing: 180, size_m: 0.2 };
+    const seen = { u: -4, v: 1.5, facing: 110 };
+    const a = alignFromMarker(seen, anchor);
+    expect(a.theta).toBe(70);
+    const [x, y] = toMap(a, seen.u, seen.v);
+    near(x, 3); near(y, 10);
+    // Two metres in front of the marker (along its facing) is two metres in front of it on the map.
+    const [fx, fy] = toMap(a, seen.u + 2 * Math.sin(rad(110)), seen.v + 2 * Math.cos(rad(110)));
+    near(fx, 3); near(fy, 8);
+  });
+
+  const anchors = [{ id: 'cafe', x: 10, y: 20, facing: 90, size_m: 0.2 }, { id: 'hall', x: -5, y: 0, facing: 0, size_m: 0.2 }];
+  // The AR session sits 30° and (2, 1) off the map; build what the phone would see.
+  const offset = { theta: -30, tx: 0, ty: 0 };
+  const ar = (x: number, y: number): [number, number] => toMap(offset, x - 2, y - 1);
+  const seeMarker = (t: ArTracker, id: string, time: number, nudge = 0) => {
+    const a = anchors.find((q) => q.id === id)!;
+    const [u, v] = ar(a.x + nudge, a.y);
+    return t.onMarker(id, markerMatrix(u, v, a.facing - 30), time);
+  };
+  const frameAt = (t: ArTracker, x: number, y: number, h: number, time: number, state: 'normal' | 'limited' | 'none' = 'normal') => {
+    const [u, v] = ar(x, y);
+    t.onFrame(cameraMatrix(u, v, h - 30, 5), state, time);
+  };
+
+  test('the tracker gives a map pose only once a marker has been seen', () => {
+    const t = new ArTracker();
+    t.setAnchors(anchors);
+    frameAt(t, 4, 4, 45, 0);
+    expect(t.pose(0)).toBeNull();
+    expect(t.onMarker('nope', markerMatrix(0, 0, 0), 0)).toBe(false);      // not one of this map's
+    expect(seeMarker(t, 'cafe', 0)).toBe(true);
+    const p = t.pose(0)!;
+    near(p.x, 4); near(p.y, 4); nearDeg(p.heading, 45); near(p.pitch, 5); expect(p.acc).toBe(0.3);
+    // Walk 3 m along heading 45.
+    frameAt(t, 4 + 3 * Math.SQRT1_2, 4 + 3 * Math.SQRT1_2, 45, 0.5);
+    const q = t.pose(0.5)!;
+    near(Math.hypot(q.x - p.x, q.y - p.y), 3);
+  });
+
+  test('lost or silent tracking hands back to GPS', () => {
+    const t = new ArTracker();
+    t.setAnchors(anchors);
+    seeMarker(t, 'hall', 0);
+    frameAt(t, 0, 0, 0, 0, 'limited');
+    expect(t.pose(0)!.acc).toBe(1);
+    expect(t.pose(AR_STALE_S + 0.01)).toBeNull();         // no frames for too long
+    frameAt(t, 0, 0, 0, 2, 'none');
+    expect(t.pose(2)).toBeNull();
+    frameAt(t, 0, 0, 0, 3);
+    expect(t.pose(3)).not.toBeNull();
+    t.onReset();                                            // a new session: the old sighting is meaningless
+    frameAt(t, 0, 0, 0, 4);
+    expect(t.pose(4)).toBeNull();
+  });
+
+  test('a second sighting corrects drift smoothly, not with a jump', () => {
+    const t = new ArTracker();
+    t.setAnchors(anchors);
+    seeMarker(t, 'cafe', 0);
+    frameAt(t, 8, 20, 90, 1);
+    const before = t.pose(1)!;
+    seeMarker(t, 'cafe', 1, 0.8);                          // drifted: the marker now reads 0.8 m off
+    const at = t.pose(1)!;
+    near(at.x, before.x, 1e-9); near(at.y, before.y, 1e-9);
+    frameAt(t, 8, 20, 90, 4);
+    const later = t.pose(4)!;
+    near(later.x, before.x - 0.8, 0.01);                   // settled onto the corrected place
+  });
+
+  test('a new map keeps the alignment if it has the marker last seen', () => {
+    const t = new ArTracker();
+    t.setAnchors(anchors);
+    seeMarker(t, 'hall', 0);
+    frameAt(t, 1, 1, 0, 0);
+    t.setAnchors([anchors[1]]);
+    expect(t.anchored).toBe(true);
+    t.setAnchors([anchors[0]]);
+    expect(t.anchored).toBe(false);
+  });
+
+  test('GPS tracking can take over a position AR measured', () => {
+    const p = new PositionTracker();
+    p.setFrame(FRAME, 0);
+    p.adopt(12, -4, 0.3, 1);
+    const e = p.estimate(1);
+    expect([e.x, e.y, e.hasFix]).toEqual([12, -4, true]);
+    expect(e.acc).toBeCloseTo(0.3, 5);
+  });
+});
 
 test.describe('walls', () => {
   const wall: Wall[] = [[-5, 5, 5, 5]];

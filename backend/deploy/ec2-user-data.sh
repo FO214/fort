@@ -10,4 +10,6 @@ cd /opt && git clone https://github.com/FO214/loonie.git
 cd loonie/backend/deploy
 IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)
 echo "PUBLIC_HOST=${IP//./-}.sslip.io" > .env
+# The key for uploading maps (POST /maps/{id}). Read it back with: cat /opt/loonie/backend/deploy/.env
+echo "LOONIE_UPLOAD_KEY=$(openssl rand -hex 24)" >> .env
 docker-compose up -d --build

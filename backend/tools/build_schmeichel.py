@@ -72,6 +72,20 @@ ATRIUM_SOUTH_Y = -17.0          # wall behind the registration desks
 ATRIUM_EAST_X = 22.0            # glass-fronted rooms east of the atrium
 
 
+# ---- AR markers (PLACEHOLDERS: measure on site before playing in AR) ------
+# Where the printed markers hang. An AR phone that sees one knows exactly
+# where it is. These are guesses from the plan; once the sheets are up, put
+# the measured spot of each one's centre here and rebuild. Size is the
+# printed width (npm run markers prints them at this size).
+MARKER_SIZE_M = 0.18           # fits one to a sheet of A4 or Letter
+ATRIUM_MARKER_X = None           # None: straight south of the helicopter spot
+
+
+def heading_of(dx: float, dy: float) -> float:
+    """Map heading of a direction (0 = +y, clockwise)."""
+    return round(math.degrees(math.atan2(dx, dy)) % 360.0, 1)
+
+
 def seg(p, q):
     return [p[0], p[1], q[0], q[1]]
 
@@ -121,6 +135,14 @@ def build() -> dict:
         (19.5, -14.5), (-5.0, -14.0),                        # the glass doors behind the atrium; the desk corner
     ]
     heli = nodes["helicopter"]
+    cafe_marker = wing(33, CAFE_EAST)
+    anchors = [
+        # On the café counter wall, facing back into the café (west, across the wing).
+        {"id": "cafe", "x": cafe_marker[0], "y": cafe_marker[1], "facing": heading_of(-V[0], -V[1]), "size_m": MARKER_SIZE_M},
+        # On the wall behind the registration desks, facing north into the atrium.
+        {"id": "atrium", "x": heli[0] if ATRIUM_MARKER_X is None else ATRIUM_MARKER_X, "y": ATRIUM_SOUTH_Y,
+         "facing": 0.0, "size_m": MARKER_SIZE_M},
+    ]
     return {
         "id": "schmeichel",
         "name": "Schmeichel Building, ground floor",
@@ -142,6 +164,7 @@ def build() -> dict:
         "graph": {"nodes": {k: list(p) for k, p in nodes.items()}, "edges": edges},
         "spawn": {"mode": "points", "min_m": 9},
         "spawn_points": [list(p) for p in spawn_points],
+        "anchors": anchors,
     }
 
 
@@ -192,6 +215,10 @@ def render_plan(data: dict) -> str:
     out.append(f'<rect x="{x - 9:.1f}" y="{y - 9:.1f}" width="18" height="18" rx="4" fill="#facc15" stroke="#111111"/>')
     out.append(f'<text x="{x:.1f}" y="{y + 4.5:.1f}" text-anchor="middle" {font} font-size="13" font-weight="800">H</text>')
     out.append(f'<text x="{x + 14:.1f}" y="{y - 12:.1f}" {font} font-size="12" font-weight="700" fill="#854d0e">HELICOPTER (tape the QR sign here)</text>')
+    for a in data.get("anchors", []):
+        x, y = xy((a["x"], a["y"]))
+        out.append(f'<rect x="{x - 6:.1f}" y="{y - 6:.1f}" width="12" height="12" fill="#7c3aed" stroke="#ffffff"/>')
+        out.append(f'<text x="{x + 10:.1f}" y="{y + 4:.1f}" {font} font-size="11" font-weight="700" fill="#7c3aed">AR marker "{a["id"]}"</text>')
     # legend, scale bar, north arrow
     ly = height - 74
     out.append(f'<path d="M 20 {ly - 5} L 24.5 {ly + 4} L 15.5 {ly + 4} Z" fill="#dc2626"/><text x="32" y="{ly + 4}" {font} font-size="11">zombie spawn point</text>')

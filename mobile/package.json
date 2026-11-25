@@ -59,7 +59,8 @@
     "brand": "node scripts/make-brand-assets.mts",
     "sounds": "node scripts/make-sounds.mts",
     "sounds:import": "node scripts/import-sounds.mts",
-    "zombie-sprites": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/make-zombie-sprites.mts"
+    "zombie-sprites": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/make-zombie-sprites.mts",
+    "markers": "node scripts/make-markers.mts"
   },
   "private": true,
   "engines": {

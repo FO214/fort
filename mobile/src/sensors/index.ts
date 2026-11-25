@@ -3,6 +3,8 @@
  *   native  → expo-location (GPS + compass) and expo-sensors (attitude, accelerometer)
  *   web     → navigator.geolocation + deviceorientation + devicemotion
  *   sim     → window.__loonieSim, driven by tests (web with ?sim=1)
+ *   AR      → (to come) a native ARKit / ARCore module, sending the
+ *             `ar*` events below; see docs/ar.md for the contract
  * All three emit the same events. Turning them into a position and a heading
  * is the job of game/tracking.ts.
  */
@@ -10,6 +12,7 @@ import * as ExpoCamera from 'expo-camera';
 import * as Location from 'expo-location';
 import * as ExpoSensors from 'expo-sensors';
 import { Platform } from 'react-native';
+import type { ArState } from '../game/arPose';
 import { upFromAttitude } from '../game/orientation';
 import { useStore } from '../store';
 
@@ -28,6 +31,15 @@ export type SensorEvent =
    * direction matters. Gives the roll.
    */
   | { k: 'up'; x: number; y: number; z: number }
+  /**
+   * AR world tracking: the camera's pose as a 4x4 column-major matrix in the
+   * session's own frame (y up, metres), and how well it is tracking.
+   */
+  | { k: 'arFrame'; m: number[]; state: ArState }
+  /** AR image detection saw a printed marker (a map anchor), as a matrix in the same frame. */
+  | { k: 'arMarker'; id: string; m: number[] }
+  /** The AR session started over: its frame is new, so nothing seen before holds. */
+  | { k: 'arReset' }
   /** Simulator only: one step taken / camera pitch set directly. */
   | { k: 'step' }
   | { k: 'pitch'; deg: number }
@@ -51,6 +63,9 @@ export interface SimHandle {
   face: (bearing: number, pitch?: number) => void;
   /** Take n steps along the current heading. */
   step: (n?: number) => void;
+  /** AR tracking reports a camera pose / sees a marker (matrices: see game/arPose.ts). */
+  arFrame: (m: number[], state?: ArState) => void;
+  arMarker: (id: string, m: number[]) => void;
 }
 
 /**
@@ -107,6 +122,8 @@ export function simHandle(): SimHandle {
         if (pitch != null) h.emit({ k: 'pitch', deg: pitch });
       },
       step(n = 1) { for (let i = 0; i < n; i++) h.emit({ k: 'step' }); },
+      arFrame(m, state = 'normal') { h.emit({ k: 'arFrame', m, state }); },
+      arMarker(id, m) { h.emit({ k: 'arMarker', id, m }); },
     };
     window.__loonieSim = h;
   }

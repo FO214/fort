@@ -19,6 +19,18 @@ export interface Settings { max_players: number; map: string; mode?: GameMode }
 
 export interface LobbyPlayer { id: string; name: string; cls: string; ready: boolean; connected: boolean }
 
+/**
+ * A printed marker hung at a known spot. An AR phone that sees it knows
+ * exactly where it is on the map (game/arPose.ts).
+ */
+export interface MapAnchor {
+  id: string; x: number; y: number;
+  /** Map heading its printed face points (out of the wall); flat on the floor, the way its top edge points. */
+  facing: number;
+  /** Printed width in metres. */
+  size_m: number;
+}
+
 export interface MapInfo {
   id: string; name: string;
   /** Latitude/longitude of map (0, 0), or null until the host's fix anchors it. */
@@ -36,6 +48,8 @@ export interface MapInfo {
   obstacles?: [number, number][][];
   /** A walked area (free play): where the host walked, which is the only open floor. */
   paths?: [number, number][][];
+  /** Printed markers an AR phone finds itself by. */
+  anchors?: MapAnchor[];
 }
 
 export interface MapChoice { id: string; name: string }

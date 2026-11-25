@@ -28,12 +28,20 @@ Map file keys (all distances in metres, x right and y up):
     nav                 "grid" to steer over open floor even without obstacles
     spawn               {"mode": "ring" | "points", "min_m", "max_m"}
     spawn_points        [[x, y], ...] used when mode is "points"
+    anchors             [{"id", "x", "y", "facing", "size_m"}, ...] printed markers an AR
+                        phone looks at to find itself on the map: where each hangs, the
+                        map heading its printed face points (out of the wall), its width
+
+Maps come from two places: the files in backend/maps/ that ship with the
+server, and maps uploaded to it (POST /maps/{id}), kept in LOONIE_MAPS_DIR.
 """
 from __future__ import annotations
 
 import json
 import math
+import os
 import random
+import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Optional, Sequence
@@ -43,6 +51,8 @@ from .grid import GridNav, resample
 from .nav import Nav
 
 MAPS_DIR = Path(__file__).resolve().parent.parent / "maps"
+DEFAULT_UPLOADS_DIR = Path(__file__).resolve().parent.parent / "uploaded_maps"
+MAP_ID = re.compile(r"^[a-z0-9-]{1,40}$")
 
 Point = tuple[float, float]
 Viewer = tuple[float, float, float]          # a player's x, y and the map heading their camera faces
@@ -94,6 +104,17 @@ def simplify(path: Sequence[Point], tol: float) -> list[Point]:
     return [p for p, k in zip(path, keep) if k]
 
 
+def _on_edge(poly: Sequence[Point], p: Point, tol: float = 0.05) -> bool:
+    """Is `p` on the polygon's boundary? A marker hangs on an outside wall."""
+    for (x1, y1), (x2, y2) in zip(poly, list(poly[1:]) + list(poly[:1])):
+        dx, dy = x2 - x1, y2 - y1
+        span = dx * dx + dy * dy
+        t = 0.0 if span == 0 else max(0.0, min(1.0, ((p[0] - x1) * dx + (p[1] - y1) * dy) / span))
+        if math.hypot(p[0] - (x1 + t * dx), p[1] - (y1 + t * dy)) <= tol:
+            return True
+    return False
+
+
 def inside(poly: Sequence[Point], p: Point) -> bool:
     """Is `p` inside the polygon? (Even-odd rule.)"""
     odd = False
@@ -109,6 +130,21 @@ class Helicopter:
     y: float
     radius_m: float = 6.0
     qr: str = "LOONIE:HELI"
+
+
+@dataclass
+class Anchor:
+    """A printed marker hung at a known spot. An AR phone that sees it knows
+    exactly where it is and which way it faces, so it can play on the map
+    without trusting GPS indoors."""
+    id: str
+    x: float
+    y: float
+    facing: float                 # map heading the printed face points, out of the wall
+    size_m: float = 0.2           # printed width: image detection needs the real size
+
+    def public(self) -> dict[str, Any]:
+        return {"id": self.id, "x": self.x, "y": self.y, "facing": self.facing, "size_m": self.size_m}
 
 
 @dataclass
@@ -129,6 +165,7 @@ class MapData:
     graph: Optional[dict[str, Any]] = None
     obstacles: list[list[Point]] = field(default_factory=list)
     paths: list[list[Point]] = field(default_factory=list)     # a walked area: where the host walked
+    anchors: list[Anchor] = field(default_factory=list)
     nav: Optional[Nav] = field(default=None, compare=False, repr=False)
 
     # ---- construction ----------------------------------------------------
@@ -163,8 +200,20 @@ class MapData:
             obstacles=obstacles,
             labels=[{"text": str(lb["text"]), "x": float(lb["x"]), "y": float(lb["y"])} for lb in d.get("labels", [])],
             graph=graph,
+            anchors=[Anchor(str(a["id"]), float(a["x"]), float(a["y"]), float(a["facing"]) % 360.0,
+                            float(a.get("size_m", 0.2))) for a in d.get("anchors", [])],
             nav=nav,
         )
+        seen: set[str] = set()
+        for a in m.anchors:
+            # A phone finds itself by these: a wrong one puts the whole squad in the wrong place.
+            if not a.id or a.id in seen:
+                raise ValueError(f"anchor id {a.id!r} is empty or used twice")
+            seen.add(a.id)
+            if not (0.02 <= a.size_m <= 5.0):
+                raise ValueError(f"anchor {a.id!r} is {a.size_m} m wide; a printed marker is 2 cm to 5 m")
+            if m.outline and not inside(m.outline, (a.x, a.y)) and not _on_edge(m.outline, (a.x, a.y)):
+                raise ValueError(f"anchor {a.id!r} at {[a.x, a.y]} is outside the building")
         for p in m.spawn_points:
             # Like the corridor check: a bad spawn point is a map bug, so refuse to load it.
             if not m.sensible_spot(p):
@@ -222,6 +271,7 @@ class MapData:
             "labels": self.labels,
             "obstacles": [[list(p) for p in poly] for poly in self.obstacles],
             # Phones draw these on the minimap every frame: send only the points the shape needs.
+            "anchors": [a.public() for a in self.anchors],
             "paths": [[[round(p[0], 2), round(p[1], 2)] for p in simplify(path, DRAW_TOLERANCE_M)] for path in self.paths],
         }
 
@@ -316,17 +366,56 @@ class MapData:
 _cache: dict[str, MapData] = {}
 
 
+def uploads_dir() -> Path:
+    """Where uploaded maps are kept. Read every time, so tests and deploys can move it."""
+    return Path(os.environ.get("LOONIE_MAPS_DIR") or DEFAULT_UPLOADS_DIR)
+
+
+def is_builtin(map_id: str) -> bool:
+    return map_id == WALK_ID or (MAPS_DIR / f"{map_id}.json").is_file()
+
+
 def load_map(map_id: str) -> MapData:
     if map_id not in _cache:
-        path = MAPS_DIR / f"{map_id}.json"
-        if not path.is_file():
+        if not MAP_ID.match(map_id):
+            raise KeyError(map_id)                # also keeps "../" out of the paths below
+        for folder in (MAPS_DIR, uploads_dir()):
+            path = folder / f"{map_id}.json"
+            if path.is_file():
+                _cache[map_id] = MapData.from_dict(json.loads(path.read_text()))
+                break
+        else:
             raise KeyError(map_id)
-        _cache[map_id] = MapData.from_dict(json.loads(path.read_text()))
     return _cache[map_id]
 
 
 def available_maps() -> list[str]:
-    return sorted(set(p.stem for p in MAPS_DIR.glob("*.json")) | set(_cache))
+    uploaded = set(p.stem for p in uploads_dir().glob("*.json")) if uploads_dir().is_dir() else set()
+    return sorted(set(p.stem for p in MAPS_DIR.glob("*.json")) | uploaded | set(_cache))
+
+
+def save_map(map_id: str, d: dict[str, Any]) -> MapData:
+    """Keep an uploaded map (a LiDAR scan, say). Checked by loading it first, so
+    a bad map is refused rather than stored. Raises ValueError for a bad map or
+    id and PermissionError for one of the maps that ship with the server."""
+    if not MAP_ID.match(map_id):
+        raise ValueError("A map id is 1-40 lower-case letters, digits and dashes")
+    if is_builtin(map_id):
+        raise PermissionError(f"{map_id!r} is one of the server's own maps")
+    if not isinstance(d, dict):
+        raise ValueError("A map is a JSON object")
+    d = {**d, "id": map_id}
+    try:
+        m = MapData.from_dict(d)
+    except (KeyError, TypeError, IndexError) as e:
+        raise ValueError(f"Not a map: missing or malformed {e}") from None
+    folder = uploads_dir()
+    folder.mkdir(parents=True, exist_ok=True)
+    tmp = folder / f".{map_id}.json.tmp"
+    tmp.write_text(json.dumps(d, indent=2, ensure_ascii=False) + "\n")
+    tmp.replace(folder / f"{map_id}.json")        # all or nothing: a half-written map never loads
+    _cache[map_id] = m                            # rooms already playing it keep the one they hold
+    return m
 
 
 def map_choices() -> list[dict[str, str]]:
