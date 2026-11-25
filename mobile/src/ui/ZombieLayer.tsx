@@ -201,7 +201,7 @@ export function ZombieLayer({ width, height, cls, aimRef, onAimChange, inset = 0
       const onTarget = ids.length > 0;
       if (onTarget !== wasOnTarget) { wasOnTarget = onTarget; notify(onTarget); }
       setItems(out);
-      setRoll((prev) => (Math.abs(prev - pose.roll) < 0.2 ? prev : pose.roll));
+      setRoll((prev) => (!Number.isFinite(pose.roll) || Math.abs(prev - pose.roll) < 0.2 ? prev : pose.roll));
       setThreats((prev) => (prev.length === 0 && shown.length === 0 ? prev : shown));
     };
     raf = requestAnimationFrame(loop);
@@ -212,7 +212,8 @@ export function ZombieLayer({ width, height, cls, aimRef, onAimChange, inset = 0
     <View style={StyleSheet.absoluteFill} pointerEvents="none" testID="zombie-layer">
       <ZombiePreload kinds={kinds} />
       {/* Turned about the screen centre, which is where the crosshair is, so aiming is unchanged. */}
-      <View style={[StyleSheet.absoluteFill, roll ? { transform: [{ rotate: `${roll}deg` }] } : null]}>
+      {/* Always a transform, never none: RN's Fabric diff passes null to processTransform when one is removed. */}
+      <View style={[StyleSheet.absoluteFill, { transform: [{ rotate: `${Number.isFinite(roll) ? roll : 0}deg` }] }]}>
       {items.map((i) => (
         <View key={i.key} testID={i.key[0] === 'z' ? `zombie-${i.id}` : `corpse-${i.id}`}
           style={{

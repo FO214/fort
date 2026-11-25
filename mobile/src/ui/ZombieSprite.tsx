@@ -111,7 +111,7 @@ function Cell({ source, sheet, place, mirror, tint, opacity = 1, dx = 0, dy = 0,
   }
   return (
     <View pointerEvents="none"
-      style={{ position: 'absolute', left, top, width: place.width, height: place.height, overflow: 'hidden', opacity, transform: mirror ? [{ scaleX: -1 }] : undefined }}>
+      style={{ position: 'absolute', left, top, width: place.width, height: place.height, overflow: 'hidden', opacity, transform: [{ scaleX: mirror ? -1 : 1 }] }}>
       <Image source={source} contentFit="fill" allowDownscaling={false} cachePolicy="memory" tintColor={tint} accessible={false}
         style={{ position: 'absolute', left: offX, top: offY, width: sheetW, height: sheetH }} />
     </View>
