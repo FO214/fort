@@ -80,8 +80,11 @@ test('four phones fight a wave together', async ({ browser }) => {
   expect(drawn!.aimed).toBe(true);
   await shot(ada.page, '05-game-on-target');
 
-  // Turn away: nothing under the sight, and a shot is just a miss.
-  await ada.page.evaluate((b) => window.__loonieSim!.aim(b + 150), target.bearing);
+  // Turn away, to the emptiest direction (the wave comes from all round): nothing under the sight, and a shot is just a miss.
+  const others = (await world(ada.page)).zombies.map((z) => z.bearing);
+  const gap = (b: number) => Math.min(...others.map((o) => Math.abs(((b - o + 540) % 360) - 180)));
+  const away = Array.from({ length: 72 }, (_, i) => i * 5).reduce((best, b) => (gap(b) > gap(best) ? b : best), 0);
+  await ada.page.evaluate((b) => window.__loonieSim!.aim(b), away);
   await expect(ada.page.locator('[data-testid=reticle][aria-label="no target"]')).toBeVisible();
   const before = await hud.ammo(ada.page);
   await ada.page.getByTestId('fire').click();
